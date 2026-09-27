@@ -1,0 +1,10 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+graphify-out/
+.serena/
+.claude/settings.local.json
+.claude/.headroom*
+MacPulse.xcodeproj/

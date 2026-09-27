@@ -1,0 +1,35 @@
+name: MacPulse
+options:
+  bundleIdPrefix: com.ohmrefresh
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+packages:
+  MacPulseKit:
+    path: Packages/MacPulseKit
+targets:
+  MacPulse:
+    type: application
+    platform: macOS
+    sources: [App/Sources]
+    dependencies:
+      - package: MacPulseKit
+        product: PulseEngine
+    info:
+      path: App/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleDisplayName: Mac Pulse
+        LSApplicationCategoryType: public.app-category.utilities
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ohmrefresh.macpulse
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        GENERATE_INFOPLIST_FILE: NO

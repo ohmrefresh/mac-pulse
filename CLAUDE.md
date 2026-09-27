@@ -1,0 +1,69 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+Mac Pulse: native macOS menu-bar system monitor. Spec: `docs/prd/Mac Pulse — Product Requirements Document (PRD).md` (mockup: `docs/prd/mockup.png`). Domain terms: `CONTEXT.md` — use its vocabulary (e.g. Health Level, never "Degraded"). Decisions: `docs/adr/`.
+
+Stack: Swift 6, SwiftUI + AppKit (`NSStatusItem`, `NSPopover`), macOS 14+, GRDB.swift for history. Distributed via Developer ID, **unsandboxed** (ADR 0001).
+
+## Commands
+
+All non-UI code is in the SwiftPM package `Packages/MacPulseKit`:
+
+```sh
+cd Packages/MacPulseKit
+swift build
+swift test                                   # all tests (swift-testing)
+swift test --filter HealthTests              # one suite
+swift test --filter HealthTests/thermalMapping   # one test
+PULSE_BENCH=1 swift test -c release --filter CollectorBenchmarks   # per-call cost budgets (opt-in)
+```
+
+App target: `MacPulse.xcodeproj` is **generated** from `project.yml` by XcodeGen and gitignored. Never edit the `.xcodeproj`; change `project.yml` and regenerate.
+
+```sh
+xcodegen generate
+xcodebuild -project MacPulse.xcodeproj -scheme MacPulse -derivedDataPath .build/xcode build
+open .build/xcode/Build/Products/Debug/MacPulse.app
+```
+
+Overhead gate (PRD §18 budgets; builds Release, launches, measures CPU/RSS):
+
+```sh
+scripts/soak.sh                 # 1 h
+DURATION=300 scripts/soak.sh    # quick check
+```
+
+Opt-in live network test: `PULSE_NET=1 swift test --filter InternetPingTests`.
+
+App sources: `App/Sources`. `LSUIElement` = true (menu-bar only, no Dock icon).
+
+## Architecture
+
+Module dependency chain (targets in `Packages/MacPulseKit`, then the app):
+
+`PulseCore` ← `PulseCollectors`, `PulseStore` ← `PulseEngine` ← `MacPulse` app
+
+- **PulseCore** — metric types, `HealthLevel`, `Connectivity`, thresholds and Health Mapping. No dependencies.
+- **PulseCollectors** — one collector per metric family over C/IOKit APIs. Delta/parse math is split into pure functions (`CPUUsage`, `NetworkRate`, `CPUTimeTracker`, `PSParser`, `BatteryCollector.parse`) and tested with fixtures; syscall paths get live plausibility tests.
+- **PulseStore** — GRDB history: in-memory buffer flushed every 30s; tiers `samples_1s` (1h) → `agg_10s` → `agg_1m` → `agg_5m` storing min/avg/max.
+- **PulseEngine** — single coalesced scheduler, alert state machine, timeline generator, diagnostics rules.
+- **MacPulse** — UI only. Single process; no daemon.
+
+Built so far: `PulseCore`; `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping); `PulseEngine` (`Cadence` + `Sampler` actor and `Prober` actor → `LiveMetrics` on the main actor, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard window (Overview, Processes; other sections are placeholders), Settings (`AppSettings`, UserDefaults). Not yet: `PulseStore`, DNS probe, alerts, timeline, diagnostics.
+
+App UI rule: popover and dashboard host SwiftUI inside AppKit (`NSPopover`, `NSWindow`) and drop their hosting controller on close, so hidden UI never re-renders. Any view that shows a process list must call `metrics.processListAppeared()/processListDisappeared()` (reference-counted) to get 1 s scans. Add other targets to `Package.swift` (and as `project.yml` dependencies) as they are built.
+
+## Invariants
+
+- **Overhead budgets (PRD §18) are hard limits:** idle CPU <1%, RSS <150 MB, network <1 MB/h, popover <150 ms, UI update <250 ms. Process scans run at 5s in background, 1s only while the popover/Processes tab is visible.
+- **Scope:** v1.0 = PRD Phase 1 + Phase 2. Phase 1 is internal milestone M1. Phases 3–4 are post-1.0.
+- **Thresholds are user-configurable** — no hardcoded alert/network constants outside defaults in `PulseCore`.
+- **Alerts:** Inactive → Pending → Firing → Resolved; resolving needs the condition false for the same duration; notify once per firing, 10-min cooldown.
+- **Diagnostics:** deterministic rules only. Every Finding has Observed / Possible cause (hedged) / Recommendation; never state a cause as certain.
+- **Temperature:** v1.0 uses `ProcessInfo.thermalState` only. No °C (private IOHID) until Phase 4.
+- **Process list is hybrid:** an unprivileged app cannot read root/system processes (~⅓ of all, incl. WindowServer). `ProcessCollector` reads its own user's processes via `proc_pid_rusage`, and fills the rest from setuid `/bin/ps` every 5 s. Don't replace `ps` with a privileged helper without an ADR.
+- **Menu-bar CPU cost is mostly AppKit**, not collectors: each title change relayouts the menu bar. Keep the status item fixed-width and only set the title when the string changes.
+- **Menu-bar-only operation** must stay fully functional; nothing critical may depend on the dashboard window.
