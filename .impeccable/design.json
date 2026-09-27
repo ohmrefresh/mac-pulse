@@ -1,0 +1,324 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-27T13:35:23+00:00",
+  "title": "Design System: Mac Pulse",
+  "platformNote": "Native macOS app (SwiftUI + AppKit). It has no web surface: the component html/css below are approximations written so this panel has something faithful to render. The source of truth is App/Sources/Components.swift.",
+  "extensions": {
+    "colorMeta": {
+      "cpu": {
+        "role": "primary",
+        "displayName": "System Blue \u2014 CPU",
+        "canonical": "oklch(0.632 0.202 254.1)",
+        "tonalRamp": [
+          "#00004B",
+          "#001079",
+          "#0037A5",
+          "#005BCF",
+          "#0080F4",
+          "#46A6FF",
+          "#7BCDFF",
+          "#B2F3FF"
+        ],
+        "darkVariant": "#0091FF"
+      },
+      "memory": {
+        "role": "primary",
+        "displayName": "System Purple \u2014 Memory",
+        "canonical": "oklch(0.622 0.263 322.5)",
+        "tonalRamp": [
+          "#2B003A",
+          "#520064",
+          "#79008D",
+          "#A000B5",
+          "#C52ED9",
+          "#E863FB",
+          "#FF95FF",
+          "#FFC7FF"
+        ],
+        "darkVariant": "#DB34F2"
+      },
+      "network": {
+        "role": "primary",
+        "displayName": "System Green \u2014 Network & Battery",
+        "canonical": "oklch(0.730 0.194 147.4)",
+        "tonalRamp": [
+          "#001600",
+          "#003700",
+          "#005800",
+          "#007B00",
+          "#009F33",
+          "#44C25F",
+          "#7DE48D",
+          "#B5FFBF"
+        ],
+        "darkVariant": "#30D158"
+      },
+      "gpu": {
+        "role": "primary",
+        "displayName": "System Teal \u2014 GPU & SSD",
+        "canonical": "oklch(0.745 0.127 203.3)",
+        "tonalRamp": [
+          "#00131D",
+          "#00323D",
+          "#00525F",
+          "#007481",
+          "#0097A3",
+          "#27BAC5",
+          "#70DDE7",
+          "#ACFFFF"
+        ],
+        "darkVariant": "#00D2E0"
+      },
+      "temperature": {
+        "role": "primary",
+        "displayName": "System Orange \u2014 Temperature",
+        "canonical": "oklch(0.753 0.172 55.7)",
+        "tonalRamp": [
+          "#2D0000",
+          "#560000",
+          "#7E1400",
+          "#A53A00",
+          "#CB6000",
+          "#EE8731",
+          "#FFB06D",
+          "#FFDCA7"
+        ],
+        "darkVariant": "#FF9230"
+      },
+      "disk": {
+        "role": "primary",
+        "displayName": "System Indigo \u2014 Disk",
+        "canonical": "oklch(0.559 0.230 279.3)",
+        "tonalRamp": [
+          "#140054",
+          "#240084",
+          "#380AB3",
+          "#513DDD",
+          "#6D66FF",
+          "#8E8FFF",
+          "#B2B9FF",
+          "#DAE4FF"
+        ],
+        "darkVariant": "#6D7CFF"
+      },
+      "developer": {
+        "role": "primary",
+        "displayName": "System Brown \u2014 Developer",
+        "canonical": "oklch(0.633 0.073 57.2)",
+        "tonalRamp": [
+          "#1B0300",
+          "#3C1B00",
+          "#5E3718",
+          "#815636",
+          "#A37858",
+          "#C69B7C",
+          "#E7C0A5",
+          "#FFE8D1"
+        ],
+        "darkVariant": "#B78A66"
+      },
+      "alert": {
+        "role": "primary",
+        "displayName": "System Red \u2014 Alerts",
+        "canonical": "oklch(0.653 0.233 25.7)",
+        "tonalRamp": [
+          "#3B0000",
+          "#6A0000",
+          "#980000",
+          "#C40000",
+          "#EC2630",
+          "#FF605B",
+          "#FF9388",
+          "#FFC6BB"
+        ],
+        "darkVariant": "#FF4245"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "black/white @ 85% alpha",
+        "tonalRamp": [
+          "#000000",
+          "#262626",
+          "#4D4D4D",
+          "#737373",
+          "#999999",
+          "#BFBFBF",
+          "#E6E6E6",
+          "#FFFFFF"
+        ],
+        "note": "Alpha-based so it composes over any surface in either appearance."
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "The page title each section draws for itself; the window title bar is hidden."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The headline figure on a summary card."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section headings, hardware name trailing in Ink Secondary."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Card titles and table content."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Statistics-rail rows, legends, key/value pairs. Dominant size on a dense page."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Units, the 'vs 5m avg' qualifier, chart footnotes."
+      }
+    },
+    "shadows": [],
+    "shadowsNote": "Deliberately empty. Mac Pulse uses no shadows; depth is a tonal step plus a 0.5pt hairline at 60% opacity. See the Flat Face Rule.",
+    "motion": [],
+    "motionNote": "The app ships no animation. Live data redraws each tick; a crossfade would fight the reading. Anything added later must convey state and honour Reduce Motion.",
+    "breakpoints": [
+      {
+        "name": "dashboard-min",
+        "value": "980px",
+        "note": "Window minimum. Summary cards wrap two-up here; rails stay beside their charts."
+      },
+      {
+        "name": "rail-wrap",
+        "value": "~1100px",
+        "note": "Below this a chart and its statistics rail stack instead of sitting side by side."
+      }
+    ],
+    "oklchRampBands": {
+      "light": {
+        "top": 0.66,
+        "bottom": 0.28
+      },
+      "dark": {
+        "top": 0.56,
+        "bottom": 0.92
+      },
+      "note": "Stepped shades walk away from their background. Every step holds >=3:1 against its own surface; asserted by ShadeRampTests."
+    }
+  },
+  "components": [
+    {
+      "name": "Metric Card",
+      "kind": "card",
+      "refersTo": "metric-card",
+      "description": "Summary card: tinted symbol and title, optional Health badge, headline figure with trend delta, sparkline, caption at full width. Approximation of MetricCard in Components.swift.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><span class=\"ds-card-icon\">\u25a0</span><span class=\"ds-card-title\">CPU</span><span class=\"ds-badge\">Healthy</span></div><div class=\"ds-card-body\"><div><div class=\"ds-figure\">12%</div><div class=\"ds-delta\">\u2193 2% <span class=\"ds-muted\">vs 5m avg</span></div></div></div><div class=\"ds-caption\">Apple M5 Pro</div></div>",
+      "css": ".ds-card{background:#F5F5F5;border:0.5px solid rgba(0,0,0,0.1);border-radius:12px;padding:16px;font-family:-apple-system,system-ui;min-width:240px}.ds-card-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}.ds-card-icon{color:#0088FF}.ds-card-title{font-size:13px;font-weight:700;color:rgba(0,0,0,0.85);flex:1}.ds-figure{font-size:22px;font-weight:600;color:rgba(0,0,0,0.85);font-variant-numeric:tabular-nums}.ds-delta{font-size:10px;color:#34C759;font-variant-numeric:tabular-nums;margin-top:3px}.ds-muted{color:rgba(0,0,0,0.5)}.ds-caption{font-size:10px;color:rgba(0,0,0,0.5);margin-top:6px}"
+    },
+    {
+      "name": "Statistics Rail Row",
+      "kind": "custom",
+      "refersTo": "stat-rail-row",
+      "description": "Label left, value right in monospaced digits. A row whose value is nil is omitted entirely rather than dashed. Approximation of StatRail.",
+      "html": "<div class=\"ds-rail\"><div class=\"ds-rail-row\"><span>Total usage</span><b>12%</b></div><div class=\"ds-rail-row\"><span>Current frequency</span><b>2.42 GHz</b></div><div class=\"ds-rail-row\"><span>Cores (Super)</span><b>5</b></div></div>",
+      "css": ".ds-rail{width:230px;font-family:-apple-system,system-ui;font-size:12px}.ds-rail-row{display:flex;justify-content:space-between;gap:12px;padding:3.5px 0}.ds-rail-row span{color:rgba(0,0,0,0.5)}.ds-rail-row b{font-weight:400;color:rgba(0,0,0,0.85);font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Health Badge",
+      "kind": "chip",
+      "refersTo": "health-badge",
+      "description": "The only component that changes colour with state: text in the Health tint over the same tint at 15%. Approximation of HealthBadge.",
+      "html": "<span class=\"ds-badge\">Healthy</span> <span class=\"ds-badge ds-badge-warn\">Warning</span> <span class=\"ds-badge ds-badge-crit\">Critical</span>",
+      "css": ".ds-badge{display:inline-block;font-family:-apple-system,system-ui;font-size:10px;font-weight:500;padding:2px 8px;border-radius:999px;color:#34C759;background:rgba(52,199,89,0.15)}.ds-badge-warn{color:#FF8D28;background:rgba(255,141,40,0.15)}.ds-badge-crit{color:#FF383C;background:rgba(255,56,60,0.15)}"
+    },
+    {
+      "name": "Navigation Button",
+      "kind": "button",
+      "refersTo": "button-prominent",
+      "description": "Two only: one prominent action per page (Run Diagnostics) and a small bordered button for going elsewhere (View History). A plain button styled as a clickable row is forbidden - it has no hover or focus ring.",
+      "html": "<button class=\"ds-btn-prominent\">Run Diagnostics</button> <button class=\"ds-btn-small\">View History</button>",
+      "css": ".ds-btn-prominent{font-family:-apple-system,system-ui;font-size:13px;background:#0088FF;color:#fff;border:none;border-radius:8px;padding:6px 14px}.ds-btn-prominent:hover{background:#0070D8}.ds-btn-small{font-family:-apple-system,system-ui;font-size:11px;background:#FFF;color:rgba(0,0,0,0.85);border:0.5px solid rgba(0,0,0,0.2);border-radius:6px;padding:3px 10px}.ds-btn-small:hover{background:#F0F0F0}.ds-btn-prominent:focus-visible,.ds-btn-small:focus-visible{outline:3px solid rgba(0,136,255,0.5);outline-offset:1px}"
+    },
+    {
+      "name": "Chart Empty State",
+      "kind": "custom",
+      "refersTo": "metric-card",
+      "description": "Before two samples exist the grid stays visible and one line names what is coming. A skeleton, never a spinner, and it distinguishes 'not yet' from 'never'.",
+      "html": "<div class=\"ds-chart\"><div class=\"ds-grid\"></div><div class=\"ds-empty\">CPU usage appears within a few seconds.</div></div>",
+      "css": ".ds-chart{position:relative;height:120px;width:320px;font-family:-apple-system,system-ui}.ds-grid{position:absolute;inset:0;background:repeating-linear-gradient(to top,transparent,transparent 29px,rgba(0,0,0,0.08) 29px,rgba(0,0,0,0.08) 30px)}.ds-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:rgba(0,0,0,0.5)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Flight Recorder",
+    "overview": "Mac Pulse is not a dashboard that decorates telemetry; it is an instrument that keeps the record. The interface exists to answer three questions in order - what is happening, when did it start, what is likely causing it - and every visual decision serves that sequence. Readings are dense, unemotional and timestamped. Colour marks an event, not a mood.\n\nThe system is deliberately built from macOS's own materials: Apple's system colors, SF Pro at stock text styles, stock controls. It owns no typeface and no palette. That is the point - a figure the app prints should be checkable against Activity Monitor, and a control should behave the way every other Mac control behaves. Identity comes from what is shown and what is refused, not from custom chrome.",
+    "keyCharacteristics": [
+      "Flat surfaces, hairline borders, no shadows anywhere",
+      "One tint per metric family, stepped in OKLCH when a chart needs parts",
+      "Status colour reserved for Health Level; never decorative",
+      "Monospaced digits on every figure that changes",
+      "Native controls only - hover, focus and keyboard come from the system",
+      "A value this Mac cannot report is absent, never dashed"
+    ],
+    "rules": [
+      {
+        "name": "The One Job Rule",
+        "body": "A tint means exactly one metric family. If a chart needs several parts of one family, step the same tint with MetricStyle.shade(_:of:) - never reach for a second hue. Rainbow series are forbidden.",
+        "section": "colors"
+      },
+      {
+        "name": "The Status Reserve Rule",
+        "body": "Green, orange and red carry Health Level and nothing else. A metric is never coloured by how alarming its value is; it is coloured by what it measures.",
+        "section": "colors"
+      },
+      {
+        "name": "The Away-From-Background Rule",
+        "body": "Stepped shades must walk away from the surface they sit on: darker on light, lighter on dark. Every step holds >=3:1 against its own background, asserted by tests.",
+        "section": "colors"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Multi-word labels are sentence case. Acronyms keep their case, and names the machine supplies keep theirs.",
+        "section": "typography"
+      },
+      {
+        "name": "The Stable Digit Rule",
+        "body": "Any number that updates carries monospacedDigit(). A figure that reflows while you read it is a bug.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Face Rule",
+        "body": "No shadow, no blur, no glass. If a surface needs to stand out it gets the hairline and the tonal step - that is the whole vocabulary.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Stock Control Rule",
+        "body": "If AppKit or SwiftUI ships the affordance, use it. A custom row that merely looks clickable loses hover, focus ring and keyboard reachability.",
+        "section": "components"
+      },
+      {
+        "name": "The Nil Row Rule",
+        "body": "Components render String? and drop nil rows. Nothing displays an em dash for a value the machine cannot report.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Do take tints from MetricStyle and step them with shade(_:of:). One tint per family, always.",
+      "Do keep status colour for Health Level alone - green/orange/red mean a state, never a category.",
+      "Do set monospacedDigit() on every figure that updates.",
+      "Do hide a row whose value this Mac cannot report - absence is the honest signal.",
+      "Do write multi-word labels in sentence case, and keep the machine's own words exactly as the machine gives them.",
+      "Do verify both appearances on screen. A ramp that reads well on dark can walk into a white background.",
+      "Do use stock controls so hover, focus and keyboard come from the system.",
+      "Do keep every meaningful graphic at >=3:1 against its background, and print the value beside it."
+    ],
+    "donts": [
+      "Don't ship gamer/RGB monitoring skin cues: neon gradients, animated gauges, glowing rings, carbon-fibre texture.",
+      "Don't fall back to Activity Monitor's blandness - unstyled tables with no hierarchy answer nothing at a glance.",
+      "Don't build the SaaS dashboard template: hero metric tiles with gradient accents, identical card grids, decorative illustrations, purple-blue gradients.",
+      "Don't go alarmist red-everywhere. Warning colour for routine variation trains the user to ignore the one that matters.",
+      "Don't add shadows, blur or glass. If it looks lifted, it is wrong.",
+      "Don't nest a card inside a card.",
+      "Don't introduce a second hue to separate parts of one metric. Step the tint, and draw the edge.",
+      "Don't show a dash, a zero, or an estimate where a real reading is unavailable.",
+      "Don't animate live data. Motion must convey state; the app ships none, and anything added later must honour Reduce Motion."
+    ]
+  }
+}
