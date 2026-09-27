@@ -226,7 +226,9 @@ struct PerformanceView: View {
         if range == .live {
             TimeSeriesChart(series: [.init(name: "GPU", values: metrics.gpuHistory.values, tint: MetricStyle.gpu.tint)],
                             interval: metrics.gpuInterval, maximum: 100, format: { "\(Int($0))%" },
-                            accessibilityTitle: "GPU usage")
+                            accessibilityTitle: "GPU usage",
+                            // Distinguish "not yet" from "never": some Macs report no GPU counters.
+                            emptyMessage: metrics.gpu == nil ? "No GPU data on this Mac." : nil)
         } else {
             HistoryChart(history: metrics.history,
                          lines: [.init(kind: .gpuPercent, name: "GPU", tint: MetricStyle.gpu.tint)],

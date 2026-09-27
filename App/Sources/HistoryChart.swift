@@ -59,11 +59,12 @@ struct HistoryChart: View {
     var body: some View {
         Group {
             if history == nil {
-                placeholder("History unavailable")
+                placeholder("History unavailable — Mac Pulse could not open its database.")
             } else if let error {
-                placeholder(error)
+                placeholder("History could not be read. \(error)")
             } else if loaded.values.allSatisfy({ $0.points.isEmpty }) {
-                placeholder(loaded.isEmpty ? "Loading…" : "No data recorded in this range yet")
+                // A fresh install has nothing stored yet; say so rather than implying a gap.
+                placeholder(loaded.isEmpty ? "Loading…" : "Nothing recorded in the last \(range.label) yet. History builds while Mac Pulse runs.")
             } else {
                 chart
             }
@@ -180,7 +181,12 @@ struct HistoryChart: View {
     }
 
     private func placeholder(_ text: String) -> some View {
-        Text(text).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func load() async {

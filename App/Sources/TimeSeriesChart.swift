@@ -24,6 +24,9 @@ struct TimeSeriesChart: View {
     var emphasis: (String) -> CGFloat = { _ in 1.4 }
     /// What the chart is of, for VoiceOver ("CPU usage"). The latest value per series is announced with it.
     var accessibilityTitle: String?
+    /// Shown instead of an empty grid before the first samples land. Defaults to naming the metric
+    /// and how soon it arrives; pass a specific message when the metric never will (no GPU fitted).
+    var emptyMessage: String?
 
     var body: some View {
         let plotted = Self.fitted(series, interval: interval)
@@ -78,11 +81,27 @@ struct TimeSeriesChart: View {
             }
         }
         .chartLegend(showsLegend && series.count > 1 ? .visible : .hidden)
+        // A line needs two points; until then the grid would sit there empty saying nothing.
+        .overlay { if isEmpty { emptyState } }
         // Swift Charts makes every mark its own element: a per-core chart is thousands of them,
         // which is unusable with VoiceOver. Collapse to one element that states the latest values.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? series.map(\.name).joined(separator: ", "))
         .accessibilityValue(summary)
+    }
+
+    private var isEmpty: Bool {
+        series.allSatisfy { $0.values.filter { !$0.isNaN }.count < 2 }
+    }
+
+    /// Quiet and self-resolving: the axes stay visible behind it, so the chart reads as filling in
+    /// rather than broken. Nothing to click — at a one-second cadence it resolves itself.
+    private var emptyState: some View {
+        Text(emptyMessage ?? "\(accessibilityTitle ?? "Data") appears within a few seconds.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 12)
     }
 
     /// "CPU 12%, 5 minutes" — latest value per series, then the span the chart covers.
@@ -92,7 +111,7 @@ struct TimeSeriesChart: View {
             return "\(s.name) \(format(value))"
         }
         let span = Self.ago(-Double(series.map(\.values.count).max() ?? 0) * interval)
-        guard !latest.isEmpty else { return "No data yet" }
+        guard !latest.isEmpty else { return emptyMessage ?? "No data yet" }
         return latest.joined(separator: ", ") + ", over \(span)"
     }
 
