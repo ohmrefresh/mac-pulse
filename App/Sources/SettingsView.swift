@@ -4,8 +4,10 @@ import PulseStore
 
 struct SettingsView: View {
     @Bindable var settings: AppSettings
+    let metrics: LiveMetrics
     @State private var confirmClear = false
     @State private var clearMessage: String?
+    @State private var previewVisible = false
 
     var body: some View {
         TabView {
@@ -41,9 +43,20 @@ struct SettingsView: View {
                 Toggle(label(item), isOn: Binding(get: { settings.isEnabled(item) },
                                                   set: { settings.setEnabled(item, $0) }))
             }
-            Text("Reserves room for: " + MenuBarFormatter.widestText(settings.menuBarItems))
+            Text(menuBarPreview)
                 .font(.caption).foregroundStyle(.secondary)
+                .onAppear { previewVisible = true }
+                .onDisappear { previewVisible = false }
         }
+    }
+
+    /// What the menu bar renders right now. Live readings are only read while this tab is on
+    /// screen, so a closed Settings window cannot hold an observed dependency on them and
+    /// re-render every tick — whether or not SwiftUI keeps the scene's view tree alive.
+    private var menuBarPreview: String {
+        guard previewVisible else { return "" }
+        guard !settings.menuBarItems.isEmpty else { return "Shows the Mac Pulse icon only." }
+        return "Shows: " + MenuBarFormatter.text(settings.menuBarItems, metrics.menuBarInputs)
     }
 
     private var network: some View {

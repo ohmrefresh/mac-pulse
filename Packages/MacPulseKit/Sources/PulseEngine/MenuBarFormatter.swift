@@ -49,24 +49,6 @@ public enum MenuBarFormatter {
         items.compactMap { item in segment(item, inputs).map { (item, $0) } }
     }
 
-    /// Longest string each item can render, for sizing a fixed-width status item.
-    public static func widestText(_ items: [MenuBarItem]) -> String {
-        items.map(widestSegment).joined(separator: separator)
-    }
-
-    public static func widestSegment(_ item: MenuBarItem) -> String {
-        switch item {
-        case .cpu: "CPU 100%"
-        case .memory: "MEM 100%"
-        case .network: "↓999M ↑999M"
-        case .latency: "9999ms"
-        case .battery: "BAT 100%"
-        case .thermal: "Critical"
-        case .temperature: "100°C"
-        case .gpu: "GPU 100%"
-        }
-    }
-
     /// SF Symbol shown before an item's text when menu-bar icons are on.
     public static func symbol(for item: MenuBarItem) -> String {
         switch item {

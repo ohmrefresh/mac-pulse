@@ -31,12 +31,6 @@ import PulseCollectors
         #expect(MenuBarFormatter.text([.cpu, .battery], MenuBarInputs()) == "CPU --")
     }
 
-    @Test func widestCoversEveryRenderedSegment() {
-        let widest = MenuBarFormatter.widestText(MenuBarItem.allCases)
-        #expect(widest == "CPU 100% | MEM 100% | ↓999M ↑999M | 9999ms | BAT 100% | Critical | 100°C | GPU 100%")
-        #expect("Offline".count <= "9999ms".count + 1)
-    }
-
     @Test func rateFormatting() {
         #expect(MenuBarFormatter.rate(0) == "0K")
         #expect(MenuBarFormatter.rate(999) == "0K")

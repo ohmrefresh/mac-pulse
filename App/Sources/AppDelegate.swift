@@ -29,10 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         item.button?.action = #selector(togglePopover)
         statusItem = item
 
-        settings.onMenuBarChange = { [weak self] in
-            self?.resizeStatusItem()
-            self?.updateStatusTitle()
-        }
+        settings.onMenuBarChange = { [weak self] in self?.updateStatusTitle() }
         metrics.onAlert = { [weak self] event in self?.notifier.deliver(event) }
         settings.onAlertEnabled = { [weak self] in
             guard let notifier = self?.notifier else { return }
@@ -40,24 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         settings.applyAtLaunch()
         observeSleepWake()
-        resizeStatusItem()
         metrics.start()
         updateStatusTitle()
     }
 
     private static let statusFont = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-
-    /// Fixed width: a variable-length item relayouts the whole menu bar on every title change,
-    /// which dominated idle CPU. Sized for the widest string the enabled items can produce.
-    private func resizeStatusItem() {
-        let items = settings.menuBarItems
-        guard !items.isEmpty else {
-            statusItem?.length = NSStatusItem.squareLength
-            return
-        }
-        let widest = statusTitle(items.map { ($0, MenuBarFormatter.widestSegment($0)) })
-        statusItem?.length = ceil(widest.size().width + 12)
-    }
+    /// Room left around the title inside the status item's button.
+    private static let statusPadding: CGFloat = 12
 
     /// Segment text with an optional template SF Symbol before each item. Template images follow the
     /// menu bar's light/dark/highlighted appearance like the system's own items.
@@ -100,8 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// What the title currently shows. `button.title` can't be compared: with attachments it contains
     /// placeholder characters, so every tick would look like a change and relayout the menu bar.
     private var shownTitleKey: String?
+    /// The width the item currently reserves; a change here relayouts the whole menu bar.
+    private var shownWidth: CGFloat?
 
-    /// Re-renders the menu-bar text when readings it depends on change, throttled.
+    /// Re-renders the menu-bar text when readings it depends on change, throttled. The item is
+    /// sized to the title it draws, and both title and length are written only when they change,
+    /// so a menu-bar relayout costs a digit-count change rather than a tick.
     private func updateStatusTitle() {
         lastTitleUpdate = .now
         withObservationTracking {
@@ -111,11 +101,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             let key = "\(settings.menuBarShowsIcons)|" + segments.map(\.text).joined(separator: MenuBarFormatter.separator)
             if key != shownTitleKey {
                 shownTitleKey = key
-                statusItem?.button?.attributedTitle = statusTitle(segments)
+                let title = statusTitle(segments)
+                let width = segments.isEmpty ? NSStatusItem.squareLength
+                                             : ceil(title.size().width + Self.statusPadding)
+                // Set the width first so the title is never drawn into a box too small for it.
+                if width != shownWidth {
+                    shownWidth = width
+                    statusItem?.length = width
+                }
+                statusItem?.button?.attributedTitle = title
             }
-            if items.isEmpty, statusItem?.button?.image == nil {
+            if segments.isEmpty, statusItem?.button?.image == nil {
                 statusItem?.button?.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: "Mac Pulse")
-            } else if !items.isEmpty {
+            } else if !segments.isEmpty {
                 statusItem?.button?.image = nil
             }
         } onChange: {
