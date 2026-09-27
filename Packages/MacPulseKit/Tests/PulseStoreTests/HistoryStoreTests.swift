@@ -68,6 +68,42 @@ import PulseCore
         #expect(try store.series(.cpuPercent, from: at(0), to: at(20), now: at(7_200)).isEmpty)
     }
 
+    @Test func chartSeriesRebucketsRawKeepingExtremes() throws {
+        let store = try HistoryStore(url: nil)
+        var samples = cpu(0..<600)
+        samples[300] = MetricSample(kind: .cpuPercent, value: 999, timestamp: at(300))   // spike
+        try store.write(samples: samples, processes: [], now: at(600), retention: .thirtyDays)
+        let s = try store.chartSeries(.cpuPercent, from: at(0), to: at(599), now: at(600), maxPoints: 60)
+        #expect(s.stepSeconds == 10)
+        #expect(s.points.count == 60)
+        #expect(s.points[0] == HistoryPoint(time: at(0), min: 0, avg: 4.5, max: 9))
+        #expect(s.points[30].max == 999)                        // the spike survives re-bucketing
+    }
+
+    @Test func chartSeriesFromAggregateTierUsesWeightedAverage() throws {
+        let store = try HistoryStore(url: nil)
+        try store.write(samples: cpu(0..<120), processes: [], now: at(120), retention: .thirtyDays)
+        // Two hours later the 10 s tier is used; ask for 2 points over 2 minutes → 60 s steps.
+        let s = try store.chartSeries(.cpuPercent, from: at(0), to: at(119), now: at(7_200), maxPoints: 2)
+        #expect(s.stepSeconds == 60)
+        #expect(s.points.map(\.avg) == [29.5, 89.5])
+        #expect(s.points.map(\.min) == [0, 60] && s.points.map(\.max) == [59, 119])
+    }
+
+    @Test func stepIsMultipleOfTierBucket() {
+        #expect(HistoryStore.step(span: 3_600, tierBucket: 1, maxPoints: 600) == 6)
+        #expect(HistoryStore.step(span: 86_400, tierBucket: 10, maxPoints: 600) == 150)
+        #expect(HistoryStore.step(span: 604_800, tierBucket: 60, maxPoints: 600) == 1_020)
+        #expect(HistoryStore.step(span: 100, tierBucket: 10, maxPoints: 600) == 10)
+    }
+
+    @Test func segmentsBreakAtGaps() {
+        func p(_ t: Double) -> HistoryPoint { HistoryPoint(time: at(t), min: 0, avg: 0, max: 0) }
+        let s = HistorySeries(points: [p(0), p(10), p(20), p(200), p(210)], stepSeconds: 10)
+        #expect(s.segments.map { $0.count } == [3, 2])
+        #expect(HistorySeries(points: [], stepSeconds: 10).segments.isEmpty)
+    }
+
     @Test func tierSelectionByAge() {
         let now = at(0)
         #expect(HistoryStore.tier(covering: at(-3_600), now: now).table == "samples_1s")

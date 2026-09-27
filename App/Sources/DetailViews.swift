@@ -3,28 +3,45 @@ import Charts
 import PulseCore
 import PulseCollectors
 import PulseEngine
+import PulseStore
 
 // Section screens for the dashboard (PRD §16). History here is the in-memory last few minutes;
 // longer ranges arrive with PulseStore in v1.0.
 
 struct PerformanceView: View {
     let metrics: LiveMetrics
+    @State private var range: ChartRange = .live
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                ChartRangePicker(range: $range)
                 Section2(title: "CPU", subtitle: metrics.processorName) {
-                    TimeSeriesChart(series: [.init(name: "CPU", values: metrics.cpuHistory.values)],
-                                    interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
-                        .frame(height: 180)
+                    Group {
+                        if range == .live {
+                            TimeSeriesChart(series: [.init(name: "CPU", values: metrics.cpuHistory.values)],
+                                            interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
+                        } else {
+                            HistoryChart(history: metrics.history, lines: [.init(kind: .cpuPercent, name: "CPU")],
+                                         range: range, maximum: 100, format: { "\(Int($0))%" })
+                        }
+                    }
+                    .frame(height: 180)
                     if let cores = metrics.cpu?.perCorePercent {
                         PerCoreBars(values: cores)
                     }
                 }
                 Section2(title: "Memory", subtitle: metrics.memory.map { "\(Format.memory($0.totalBytes)) installed" }) {
-                    TimeSeriesChart(series: [.init(name: "Used", values: metrics.memoryHistory.values)],
-                                    interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
-                        .frame(height: 180)
+                    Group {
+                        if range == .live {
+                            TimeSeriesChart(series: [.init(name: "Used", values: metrics.memoryHistory.values)],
+                                            interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
+                        } else {
+                            HistoryChart(history: metrics.history, lines: [.init(kind: .memoryPercent, name: "Used")],
+                                         range: range, maximum: 100, format: { "\(Int($0))%" })
+                        }
+                    }
+                    .frame(height: 180)
                     if let m = metrics.memory {
                         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
                             KeyValue("Used", Format.memory(m.usedBytes))
@@ -58,21 +75,43 @@ private struct PerCoreBars: View {
 
 struct NetworkDetailView: View {
     let metrics: LiveMetrics
+    @State private var range: ChartRange = .live
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                ChartRangePicker(range: $range)
                 Section2(title: "Throughput", subtitle: metrics.network?.interface.map { "Interface \($0)" } ?? "No connection") {
-                    TimeSeriesChart(series: [.init(name: "Download", values: metrics.downHistory.values),
-                                             .init(name: "Upload", values: metrics.upHistory.values)],
-                                    interval: metrics.samplingInterval,
-                                    format: { MenuBarFormatter.rate($0) + "/s" })
-                        .frame(height: 180)
+                    Group {
+                        if range == .live {
+                            TimeSeriesChart(series: [.init(name: "Download", values: metrics.downHistory.values),
+                                                     .init(name: "Upload", values: metrics.upHistory.values)],
+                                            interval: metrics.samplingInterval,
+                                            format: { MenuBarFormatter.rate($0) + "/s" })
+                        } else {
+                            HistoryChart(history: metrics.history,
+                                         lines: [.init(kind: .networkDownBytesPerSec, name: "Download"),
+                                                 .init(kind: .networkUpBytesPerSec, name: "Upload")],
+                                         range: range, format: { MenuBarFormatter.rate($0) + "/s" })
+                        }
+                    }
+                    .frame(height: 180)
                 }
-                Section2(title: "Internet latency", subtitle: "Probe every 5 s · gaps are timeouts") {
-                    TimeSeriesChart(series: [.init(name: "Latency", values: metrics.latencyHistory.values)],
-                                    interval: 5, format: { "\(Int($0)) ms" })
-                        .frame(height: 160)
+                Section2(title: "Latency", subtitle: range == .live ? "Probe every 5 s · gaps are timeouts" : "Internet, second target, gateway and DNS") {
+                    Group {
+                        if range == .live {
+                            TimeSeriesChart(series: [.init(name: "Latency", values: metrics.latencyHistory.values)],
+                                            interval: 5, format: { "\(Int($0)) ms" })
+                        } else {
+                            HistoryChart(history: metrics.history,
+                                         lines: [.init(kind: .latencyMs, name: "Internet"),
+                                                 .init(kind: .secondaryLatencyMs, name: "Second target"),
+                                                 .init(kind: .gatewayLatencyMs, name: "Gateway"),
+                                                 .init(kind: .dnsLatencyMs, name: "DNS")],
+                                         range: range, format: { "\(Int($0)) ms" })
+                        }
+                    }
+                    .frame(height: 180)
                     if let h = metrics.networkHealth {
                         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
                             GridRow {

@@ -195,6 +195,36 @@ public final class HistoryStore: Sendable {
         }
     }
 
+    /// Chart-ready series: at most ~`maxPoints` points, re-bucketed in SQL from the finest tier that
+    /// covers `from`. Each point keeps the min/max of what it merges, so spikes stay visible.
+    public func chartSeries(_ kind: MetricKind, from: Date, to: Date, now: Date = Date(), maxPoints: Int = 600) throws -> HistorySeries {
+        let tier = Self.tier(covering: from, now: now)
+        let lower = Self.seconds(from), upper = Self.seconds(to)
+        let step = Self.step(span: upper - lower, tierBucket: tier.bucketSeconds, maxPoints: maxPoints)
+        let sql = tier.source == nil
+            ? """
+              SELECT ts / \(step) * \(step) AS b, MIN(value) AS min, AVG(value) AS avg, MAX(value) AS max
+              FROM samples_1s WHERE metric = ? AND ts >= ? AND ts <= ? GROUP BY b ORDER BY b
+              """
+            : """
+              SELECT bucket / \(step) * \(step) AS b, MIN(min) AS min, SUM(avg * count) / SUM(count) AS avg, MAX(max) AS max
+              FROM \(tier.table) WHERE metric = ? AND bucket >= ? AND bucket <= ? GROUP BY b ORDER BY b
+              """
+        let points = try db.read { db in
+            try Row.fetchAll(db, sql: sql, arguments: [kind.rawValue, lower / step * step, upper]).map {
+                HistoryPoint(time: Date(timeIntervalSince1970: TimeInterval($0["b"] as Int64)),
+                             min: $0["min"], avg: $0["avg"], max: $0["max"])
+            }
+        }
+        return HistorySeries(points: points, stepSeconds: step)
+    }
+
+    /// Bucket width: a multiple of the tier's own bucket, wide enough for `maxPoints`.
+    static func step(span: Int64, tierBucket: Int64, maxPoints: Int) -> Int64 {
+        let needed = max(1, (span + Int64(maxPoints) - 1) / Int64(max(maxPoints, 1)))
+        return max(tierBucket, (needed + tierBucket - 1) / tierBucket * tierBucket)
+    }
+
     /// Stored top-process samples in a time range, oldest first.
     public func processSamples(from: Date, to: Date) throws -> [ProcessSample] {
         try db.read { db in
@@ -230,4 +260,30 @@ public final class HistoryStore: Sendable {
     }
 
     private static func seconds(_ date: Date) -> Int64 { Int64(date.timeIntervalSince1970.rounded(.down)) }
+}
+
+public struct HistorySeries: Sendable, Equatable {
+    public var points: [HistoryPoint]
+    /// Seconds each point spans.
+    public var stepSeconds: Int64
+
+    public init(points: [HistoryPoint], stepSeconds: Int64) {
+        self.points = points
+        self.stepSeconds = stepSeconds
+    }
+
+    /// Splits where consecutive points are further apart than expected — the app was not running
+    /// or the Mac slept — so charts show a gap instead of a line across it.
+    public var segments: [[HistoryPoint]] {
+        let maxGap = max(3 * TimeInterval(stepSeconds), 16)
+        var result: [[HistoryPoint]] = []
+        for point in points {
+            if let last = result.last?.last, point.time.timeIntervalSince(last.time) <= maxGap {
+                result[result.count - 1].append(point)
+            } else {
+                result.append([point])
+            }
+        }
+        return result
+    }
 }
