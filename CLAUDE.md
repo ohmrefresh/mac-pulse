@@ -52,7 +52,7 @@ Module dependency chain (targets in `Packages/MacPulseKit`, then the app):
 - **PulseEngine** — single coalesced scheduler, alert state machine, timeline generator, diagnostics rules.
 - **MacPulse** — UI only. Single process; no daemon.
 
-Built so far: `PulseCore` (incl. `AlertRule` + PRD §12 templates, `TimelineEvent`); `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping, DNS probe); `PulseStore` (`HistoryStore` GRDB tiers + timeline events, `HistoryRecorder` 30 s buffered writes); `PulseEngine` (`Cadence` + `Sampler` and `Prober` actors → `LiveMetrics` on the main actor, `AlertEngine` state machine, `HistorySamples`, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard (all sections except Timeline), Alerts UI + `AlertNotifier`, Settings incl. retention + clear history. Not yet: timeline generator/UI, diagnostics, history-range charts.
+Built so far: `PulseCore` (incl. `AlertRule` + PRD §12 templates, `TimelineEvent`); `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping, DNS probe); `PulseStore` (`HistoryStore` GRDB tiers + timeline events, `HistoryRecorder` 30 s buffered writes); `PulseEngine` (`Cadence` + `Sampler` and `Prober` actors → `LiveMetrics` on the main actor, `AlertEngine` state machine, `TimelineGenerator` (debounced events; heuristics in `TimelineConfig`), `DiagnosticRules` + `DiagnosticsRunner` (15 min history + probe burst), `HistorySamples`, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard (all sections incl. Timeline; Overview has Recent Activity), Alerts UI + `AlertNotifier`, Diagnostics sheet (⌘R), sleep/wake events, Settings incl. retention + clear history. Not yet: history-range charts. Wi-Fi SSID changes are deliberately not in the timeline (needs Location Services permission).
 
 Alerts: templates are seeded **disabled**; notification permission is requested only when the user first enables a rule. Alert fire/resolve events go to the single `timeline_events` table (no separate alerts table).
 
@@ -66,7 +66,7 @@ App UI rule: popover and dashboard host SwiftUI inside AppKit (`NSPopover`, `NSW
 - **Scope:** v1.0 = PRD Phase 1 + Phase 2. Phase 1 is internal milestone M1. Phases 3–4 are post-1.0.
 - **Thresholds are user-configurable** — no hardcoded alert/network constants outside defaults in `PulseCore`.
 - **Alerts:** Inactive → Pending → Firing → Resolved; resolving needs the condition false for the same duration; notify once per firing, 10-min cooldown.
-- **Diagnostics:** deterministic rules only. Every Finding has Observed / Possible cause (hedged) / Recommendation; never state a cause as certain.
+- **Diagnostics:** deterministic rules only. Every Finding has Observed / Possible cause / Recommendation; `PossibleCause` only has `.likely`/`.possibly` cases, so an unhedged cause can't be expressed — keep it that way.
 - **Temperature:** v1.0 uses `ProcessInfo.thermalState` only. No °C (private IOHID) until Phase 4.
 - **Process list is hybrid:** an unprivileged app cannot read root/system processes (~⅓ of all, incl. WindowServer). `ProcessCollector` reads its own user's processes via `proc_pid_rusage`, and fills the rest from setuid `/bin/ps` every 5 s. Don't replace `ps` with a privileged helper without an ADR.
 - **Menu-bar CPU cost is mostly AppKit**, not collectors: each title change relayouts the menu bar. Keep the status item fixed-width and only set the title when the string changes.

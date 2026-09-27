@@ -45,6 +45,7 @@ struct DashboardView: View {
     let settings: AppSettings
     let notifier: AlertNotifier
     @State private var selection: DashboardSection? = .overview
+    @State private var showDiagnostics = false
 
     var body: some View {
         NavigationSplitView {
@@ -69,12 +70,18 @@ struct DashboardView: View {
             case .battery: BatteryView(metrics: metrics)
             case .sensors: SensorsView(metrics: metrics)
             case .alerts: AlertsView(metrics: metrics, settings: settings, notifier: notifier)
-            case .timeline:
-                // Need persistent history (PulseStore) — v1.0 / Phase 2.
-                ContentUnavailableView(selection?.rawValue ?? "", systemImage: selection?.symbol ?? "clock",
-                                       description: Text("Arrives with history in v1.0."))
+            case .timeline: TimelineSectionView(metrics: metrics)
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                // PRD §17 ⌘R.
+                Button { showDiagnostics = true } label: { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .help("Run Diagnostics (⌘R)")
+            }
+        }
+        .sheet(isPresented: $showDiagnostics) { DiagnosticsView(metrics: metrics) }
         .frame(minWidth: 820, minHeight: 560)
     }
 

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PulseCore
 import PulseEngine
 import PulseStore
 
@@ -36,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             Task { await notifier.requestAuthorizationIfNeeded() }
         }
         settings.applyAtLaunch()
+        observeSleepWake()
         resizeStatusItem()
         metrics.start()
         updateStatusTitle()
@@ -89,6 +91,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             guard let self else { return }
             titleUpdatePending = false
             updateStatusTitle()
+        }
+    }
+
+    /// Sleep/wake explain gaps in history (plan decision 9: system events).
+    private func observeSleepWake() {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.metrics.post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Mac went to sleep"))
+                Task { await self?.metrics.flushHistory() }
+            }
+        }
+        center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.metrics.post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Mac woke up"))
+            }
         }
     }
 

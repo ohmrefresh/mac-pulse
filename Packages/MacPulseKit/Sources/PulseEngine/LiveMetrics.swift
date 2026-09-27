@@ -42,6 +42,7 @@ public final class LiveMetrics {
     /// Called for every fired/resolved alert; the app decides whether to notify.
     @ObservationIgnored public var onAlert: ((AlertEvent) -> Void)?
     @ObservationIgnored private var alertEngine = AlertEngine()
+    @ObservationIgnored private var timeline = TimelineGenerator()
     static let recentEventLimit = 200
 
     @ObservationIgnored private let sampler: Sampler
@@ -62,6 +63,7 @@ public final class LiveMetrics {
         let sampler = self.sampler
         let prober = self.prober
         let recorder = self.recorder
+        post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Monitoring started"))
         Task { [weak self] in
             await sampler.start { snapshot in self?.apply(snapshot) }
             await prober.start { reading in self?.apply(reading) }
@@ -136,6 +138,17 @@ public final class LiveMetrics {
         firingAlertIDs = alertEngine.firingRuleIDs
     }
 
+    /// PRD §10 "Run Diagnostics": last 15 min of history plus a fresh probe burst (~1–2 s).
+    public func runDiagnostics() async -> DiagnosticReport {
+        await recorder?.flush()   // include samples still in the write buffer
+        let live = DiagnosticsRunner.Live(
+            memoryUsedPercent: memory?.usedPercent,
+            diskFreeBytes: disk.map { Double($0.availableBytes) },
+            primaryTarget: networkHealth?.internet?.address ?? "1.1.1.1",
+            cpuFallback: cpuHistory.values)
+        return await DiagnosticsRunner.run(history: history, live: live)
+    }
+
     /// Adds an event to the live list and the persistent timeline.
     public func post(_ event: TimelineEvent) {
         recentEvents.append(event)
@@ -168,11 +181,13 @@ public final class LiveMetrics {
 
     func apply(_ reading: NetworkHealthReading) {
         networkHealth = reading
+        let now = Date()
+        for event in timeline.observe(reading, interface: network?.interface, at: now) { post(event) }
         guard reading.connectivity == .online else { return }
         latencyHistory.append(reading.internet?.latencyMs ?? .nan)
         var values: [(AlertMetric, Double)] = [(.latencyMs, reading.internet?.latencyMs ?? .infinity)]
         if let loss = reading.internet?.lossPercent { values.append((.packetLossPercent, loss)) }
-        evaluateAlerts(values, at: Date())
+        evaluateAlerts(values, at: now)
     }
 
     func recordThermalChange(_ state: ThermalState, at date: Date) {
@@ -195,7 +210,9 @@ public final class LiveMetrics {
             thermal = v
         }
         if let v = s.processes { processes = v }
-        evaluateAlerts(Self.alertValues(s), at: Date())
+        let now = Date()
+        for event in timeline.observe(s, at: now) { post(event) }
+        evaluateAlerts(Self.alertValues(s), at: now)
     }
 
     static func alertValues(_ s: Snapshot) -> [(AlertMetric, Double)] {

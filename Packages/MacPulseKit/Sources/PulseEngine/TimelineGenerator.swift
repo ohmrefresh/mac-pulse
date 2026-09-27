@@ -1,0 +1,196 @@
+import Foundation
+import PulseCore
+import PulseCollectors
+
+/// Tunable heuristics for timeline events (plan decision 9). Tuned during M1 dogfooding.
+public struct TimelineConfig: Sendable, Equatable {
+    /// A new Health Level must hold this long before it is logged.
+    public var healthHold: TimeInterval = 10
+    /// PRD §9 example "CPU > 80%".
+    public var cpu = Threshold(warning: 80, critical: 95)
+    public var processTopN = 3
+    public var processCPUPercent: Double = 25
+    public var processHold: TimeInterval = 10
+    public var memoryGrowthBytes: UInt64 = 2 << 30
+    public var memoryGrowthWindow: TimeInterval = 300
+    /// Processes below this footprint are not tracked for growth, bounding the bookkeeping.
+    public var memoryTrackFloor: UInt64 = 256 << 20
+
+    public init() {}
+}
+
+/// Turns readings into debounced timeline events. Pure: no clock, no I/O.
+public struct TimelineGenerator: Sendable {
+    public var config: TimelineConfig
+
+    struct Debounced {
+        var reported: HealthLevel
+        var candidate: HealthLevel
+        var since: Date
+    }
+
+    private var health: [TimelineCategory: Debounced] = [:]
+    private var thermal: ThermalState?
+    private var onACPower: Bool?
+    private var connectivity: Connectivity?
+    private var interface: String?
+    /// pid → when it first qualified as a CPU hog, and whether it has been announced.
+    private var hogs: [Int32: (since: Date, announced: Bool, name: String)] = [:]
+    /// pid → recent (time, bytes) samples inside the growth window.
+    private var memory: [Int32: [(time: Date, bytes: UInt64)]] = [:]
+    private var memoryAnnounced: [Int32: Date] = [:]
+
+    public init(config: TimelineConfig = TimelineConfig()) {
+        self.config = config
+    }
+
+    // MARK: Snapshot readings
+
+    public mutating func observe(_ s: Snapshot, at now: Date) -> [TimelineEvent] {
+        var events: [TimelineEvent] = []
+        if let cpu = s.cpu {
+            let level = config.cpu.health(for: cpu.totalPercent)
+            events += debounce(.cpu, level, at: now, title: "CPU", detail: "\(Int(cpu.totalPercent.rounded()))%")
+        }
+        if let pressure = s.memory?.pressure {
+            events += debounce(.memory, pressure.health, at: now, title: "Memory pressure",
+                               detail: s.memory.map { "\(Int($0.usedPercent.rounded()))% used" })
+        }
+        if let t = s.thermal {
+            if let old = thermal, old != t {
+                events.append(TimelineEvent(time: now, category: .thermal, severity: t.health,
+                                            title: "Thermal \(Self.name(old)) → \(Self.name(t))"))
+            }
+            thermal = t
+        }
+        if let b = s.battery {
+            if let old = onACPower, old != b.onACPower {
+                events.append(TimelineEvent(time: now, category: .battery, severity: .healthy,
+                                            title: b.onACPower ? "Connected to power" : "Switched to battery power",
+                                            detail: "\(Int(b.percent.rounded()))%"))
+            }
+            onACPower = b.onACPower
+        }
+        if let rows = s.processes {
+            events += observeProcesses(rows, at: now)
+        }
+        return events
+    }
+
+    // MARK: Network readings
+
+    public mutating func observe(_ r: NetworkHealthReading, interface newInterface: String?, at now: Date) -> [TimelineEvent] {
+        var events: [TimelineEvent] = []
+        if let old = connectivity, old != r.connectivity {
+            events.append(r.connectivity == .offline
+                ? TimelineEvent(time: now, category: .connectivity, severity: .critical, title: "Offline",
+                                detail: "No network route")
+                : TimelineEvent(time: now, category: .connectivity, severity: .healthy, title: "Back online",
+                                detail: newInterface.map { "via \($0)" }))
+        }
+        connectivity = r.connectivity
+
+        if r.connectivity == .online, let newInterface {
+            if let old = interface, old != newInterface {
+                let wasVPN = Self.isVPN(old), isVPN = Self.isVPN(newInterface)
+                let title = isVPN && !wasVPN ? "VPN connected"
+                    : wasVPN && !isVPN ? "VPN disconnected"
+                    : "Network changed"
+                events.append(TimelineEvent(time: now, category: .connectivity, severity: .healthy,
+                                            title: title, detail: "\(old) → \(newInterface)"))
+            }
+            interface = newInterface
+            let detail = [r.internet?.latencyMs.map { "latency \(Int($0.rounded())) ms" } ?? "probe timeout",
+                          r.internet?.lossPercent.map { "loss \(Int($0.rounded()))%" }].compactMap { $0 }.joined(separator: ", ")
+            events += debounce(.network, r.health, at: now, title: "Network", detail: detail)
+        }
+        return events
+    }
+
+    // MARK: Helpers
+
+    /// Logs a Health Level only once it has held for `healthHold`. The first observation sets the
+    /// baseline silently so launch does not produce "→ Healthy" noise.
+    private mutating func debounce(_ category: TimelineCategory, _ level: HealthLevel, at now: Date,
+                                   title: String, detail: String?) -> [TimelineEvent] {
+        guard level != .unknown else { return [] }
+        guard var d = health[category] else {
+            health[category] = Debounced(reported: level, candidate: level, since: now)
+            return []
+        }
+        defer { health[category] = d }
+        if level == d.reported {
+            d.candidate = level
+            return []
+        }
+        if level != d.candidate {
+            d.candidate = level
+            d.since = now
+        }
+        guard now.timeIntervalSince(d.since) >= config.healthHold else { return [] }
+        let recovered = level == .healthy
+        d.reported = level
+        return [TimelineEvent(time: now, category: category, severity: level,
+                              title: recovered ? "\(title) back to normal" : "\(title) → \(Self.name(level))",
+                              detail: detail)]
+    }
+
+    private mutating func observeProcesses(_ rows: [ProcessRow], at now: Date) -> [TimelineEvent] {
+        var events: [TimelineEvent] = []
+
+        let top = rows.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(config.processTopN)
+            .filter { $0.cpuPercent > config.processCPUPercent }
+        let topPIDs = Set(top.map(\.pid))
+        hogs = hogs.filter { topPIDs.contains($0.key) }            // left the top: may be announced again later
+        for row in top {
+            var hog = hogs[row.pid] ?? (since: now, announced: false, name: row.name)
+            if !hog.announced, now.timeIntervalSince(hog.since) >= config.processHold {
+                hog.announced = true
+                events.append(TimelineEvent(time: now, category: .process, severity: .warning,
+                                            title: "\(row.name) CPU increased",
+                                            detail: "\(Int(row.cpuPercent.rounded()))% for \(Int(config.processHold)) s+"))
+            }
+            hogs[row.pid] = hog
+        }
+
+        let alive = Set(rows.map(\.pid))
+        memory = memory.filter { alive.contains($0.key) }
+        memoryAnnounced = memoryAnnounced.filter { alive.contains($0.key) && now.timeIntervalSince($0.value) < config.memoryGrowthWindow }
+        for row in rows where row.memoryBytes >= config.memoryTrackFloor {
+            var samples = (memory[row.pid] ?? []).filter { now.timeIntervalSince($0.time) <= config.memoryGrowthWindow }
+            samples.append((now, row.memoryBytes))
+            memory[row.pid] = samples
+            let low = samples.map(\.bytes).min() ?? row.memoryBytes
+            if row.memoryBytes >= low &+ config.memoryGrowthBytes, memoryAnnounced[row.pid] == nil {
+                memoryAnnounced[row.pid] = now
+                let grown = Double(row.memoryBytes - low) / Double(1 << 30)
+                events.append(TimelineEvent(time: now, category: .process, severity: .warning,
+                                            title: "\(row.name) memory grew",
+                                            detail: String(format: "+%.1f GB in under %d min", grown, Int(config.memoryGrowthWindow / 60))))
+            }
+        }
+        return events
+    }
+
+    static func isVPN(_ interface: String) -> Bool {
+        ["utun", "ipsec", "ppp"].contains { interface.hasPrefix($0) }
+    }
+
+    static func name(_ level: HealthLevel) -> String {
+        switch level {
+        case .healthy: "Healthy"
+        case .warning: "Warning"
+        case .critical: "Critical"
+        case .unknown: "Unknown"
+        }
+    }
+
+    static func name(_ state: ThermalState) -> String {
+        switch state {
+        case .nominal: "Nominal"
+        case .fair: "Fair"
+        case .serious: "Serious"
+        case .critical: "Critical"
+        }
+    }
+}

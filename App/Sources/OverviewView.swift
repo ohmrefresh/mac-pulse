@@ -21,6 +21,8 @@ struct OverviewView: View {
                 thermalCard
             }
             .padding(20)
+            recentActivity
+                .padding([.horizontal, .bottom], 20)
         }
         .navigationTitle("Overview")
     }
@@ -89,6 +91,22 @@ struct OverviewView: View {
             Detail("Cycle count", b.cycleCount.map(String.init))
             Detail("Max capacity", b.maximumCapacityPercent.map(Format.percent))
         }
+    }
+
+    /// Mockup "Recent Activity": latest events since launch; the Timeline section has full history.
+    private var recentActivity: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Recent Activity", systemImage: "clock").font(.headline)
+            let latest = Array(metrics.recentEvents.suffix(6).reversed())
+            if latest.isEmpty {
+                Text("Nothing notable yet.").foregroundStyle(.secondary)
+            } else {
+                ForEach(latest) { EventRow(event: $0) }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var thermalCard: some View {
