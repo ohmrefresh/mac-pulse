@@ -1,195 +1,245 @@
 import SwiftUI
-import Charts
 import PulseCore
 import PulseCollectors
 import PulseEngine
 
+/// Mockup Overview: fixed 3-column grid — CPU/Memory/Network, Disk/Battery/Temperature, Internet Health + Recent Activity.
 struct OverviewView: View {
     let metrics: LiveMetrics
-
-    private let columns = [GridItem(.adaptive(minimum: 250), spacing: 16)]
+    let runDiagnostics: () -> Void
+    let showTimeline: () -> Void
 
     var body: some View {
         ScrollView {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
-                cpuCard
-                memoryCard
-                networkCard
-                internetCard
-                diskCard
-                if let battery = metrics.battery { batteryCard(battery) }
-                thermalCard
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(title: "Overview", subtitle: "A real-time view of your Mac's health and performance.") {
+                    Button(action: runDiagnostics) { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .help("Run Diagnostics (⌘R)")
+                }
+                Grid(horizontalSpacing: 16, verticalSpacing: 16) {
+                    GridRow {
+                        cpuCard
+                        memoryCard
+                        networkCard
+                    }
+                    GridRow {
+                        diskCard
+                        if let battery = metrics.battery {
+                            batteryCard(battery)
+                            temperatureCard
+                        } else {
+                            temperatureCard.gridCellColumns(2)
+                        }
+                    }
+                    GridRow {
+                        internetCard
+                        recentActivity.gridCellColumns(2)
+                    }
+                }
             }
-            .padding(20)
-            recentActivity
-                .padding([.horizontal, .bottom], 20)
+            .padding(24)
         }
-        .navigationTitle("Overview")
     }
 
     private var cpuCard: some View {
-        Card(title: "CPU", symbol: "cpu", health: nil) {
+        MetricCard(title: "CPU", style: .cpu, health: metrics.cpuHealth) {
             BigValue(metrics.cpu.map { Format.percent($0.totalPercent) })
-            Text(metrics.processorName ?? "").font(.caption).foregroundStyle(.secondary)
-            Sparkline(values: metrics.cpuHistory.suffix(60), maximum: 100)
-            Detail("5-min avg", metrics.cpuFiveMinuteAverage.map(Format.percent))
-            Detail("Cores", metrics.cpu.map { "\($0.perCorePercent.count)" })
+            Text(metrics.processorName ?? " ").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100)
+            FooterStats(stats: [
+                .init(label: "Avg (5m)", value: metrics.cpuFiveMinuteAverage.map(Format.percent)),
+                .init(label: "Peak (5m)", value: metrics.cpuFiveMinutePeak.map(Format.percent)),
+                .init(label: "Cores", value: metrics.cpu.map { "\($0.perCorePercent.count)" }),
+            ])
         }
     }
 
     private var memoryCard: some View {
-        Card(title: "Memory", symbol: "memorychip", health: metrics.memory?.pressure?.health) {
-            BigValue(metrics.memory.map { "\(Format.memory($0.usedBytes)) / \(Format.memory($0.totalBytes))" })
-            Sparkline(values: metrics.memoryHistory.suffix(60), maximum: 100)
-            if let m = metrics.memory {
-                Detail("App", Format.memory(m.appBytes))
-                Detail("Wired", Format.memory(m.wiredBytes))
-                Detail("Compressed", Format.memory(m.compressedBytes))
-                Detail("Swap", Format.memory(m.swapUsedBytes))
-            }
+        let m = metrics.memory
+        return MetricCard(title: "Memory", style: .memory, health: m?.pressure?.health) {
+            BigValue(m.map { Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes) })
+            Text(m.map { "\(Format.percent($0.usedPercent)) in use" } ?? " ").font(.callout).foregroundStyle(.secondary)
+            Sparkline(values: metrics.memoryHistory.values, tint: MetricStyle.memory.tint, domain: 0...100)
+            FooterStats(stats: [
+                .init(label: "App", value: m.map { Format.memory($0.appBytes) }),
+                .init(label: "Wired", value: m.map { Format.memory($0.wiredBytes) }),
+                .init(label: "Compressed", value: m.map { Format.memory($0.compressedBytes) }),
+            ])
         }
     }
 
     private var networkCard: some View {
-        Card(title: "Network", symbol: "arrow.up.arrow.down", health: nil) {
-            BigValue(metrics.network.map {
-                "↓\(MenuBarFormatter.rate($0.downBytesPerSec))  ↑\(MenuBarFormatter.rate($0.upBytesPerSec))"
-            })
-            Sparkline(values: metrics.downHistory.suffix(60), maximum: nil)
-            Detail("Interface", metrics.network?.interface ?? "None")
+        let n = metrics.network, h = metrics.networkHealth
+        return MetricCard(title: "Network", style: .network, health: h?.health,
+                          healthLabel: h?.connectivity == .offline ? "Offline" : nil) {
+            HStack(spacing: 16) {
+                rateLabel(n?.downBytesPerSec, arrow: "arrow.down", tint: MetricStyle.network.tint)
+                rateLabel(n?.upBytesPerSec, arrow: "arrow.up", tint: MetricStyle.upload.tint)
+            }
+            Text(n?.interface.map { "Interface \($0)" } ?? "No connection").font(.callout).foregroundStyle(.secondary)
+            Sparkline(series: [
+                .init(name: "Download", values: metrics.downHistory.values, tint: MetricStyle.network.tint),
+                .init(name: "Upload", values: metrics.upHistory.values, tint: MetricStyle.upload.tint),
+            ])
+            FooterStats(stats: [
+                .init(label: "Download", value: n.map { Format.rate($0.downBytesPerSec) }, dot: MetricStyle.network.tint),
+                .init(label: "Upload", value: n.map { Format.rate($0.upBytesPerSec) }, dot: MetricStyle.upload.tint),
+                .init(label: "Ping", value: h.map(MenuBarFormatter.latency)),
+            ])
         }
     }
 
-    private var internetCard: some View {
-        let health = metrics.networkHealth
-        return Card(title: "Internet", symbol: "globe", health: health?.health,
-                    healthLabel: health?.connectivity == .offline ? "Offline" : nil) {
-            BigValue(health.map(MenuBarFormatter.latency))
-            Detail("Target", health?.internet?.address)
-            Detail("Packet loss", health?.internet?.lossPercent.map(Format.percent))
-            Detail("Gateway", health?.gateway.map { g in
-                g.latencyMs.map { "\(g.address) · \(Int($0.rounded()))ms" } ?? "\(g.address) · timeout"
-            })
+    private func rateLabel(_ value: Double?, arrow: String, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(value.map(Format.rate) ?? "--").font(.title2.weight(.semibold)).monospacedDigit()
+            Image(systemName: arrow).foregroundStyle(tint).font(.headline)
         }
+        .lineLimit(1)
+        .minimumScaleFactor(0.6)
     }
 
     private var diskCard: some View {
-        Card(title: "Disk", symbol: "internaldrive", health: nil) {
-            BigValue(metrics.disk.map { Format.bytes($0.availableBytes) + " free" })
+        MetricCard(title: "Disk", style: .disk) {
             if let d = metrics.disk, d.totalBytes > 0 {
-                ProgressView(value: Double(d.usedBytes), total: Double(d.totalBytes))
-                Detail("Volume", d.volumeName)
-                Detail("Used", "\(Format.bytes(d.usedBytes)) of \(Format.bytes(d.totalBytes))")
+                let fraction = Double(d.usedBytes) / Double(d.totalBytes)
+                Text(d.volumeName ?? "Startup disk").font(.title3.weight(.semibold))
+                HStack {
+                    Text("\(Format.bytesShort(d.usedBytes)) used / \(Format.bytesShort(d.totalBytes))")
+                    Spacer()
+                    Text(Format.percent(fraction * 100)).monospacedDigit()
+                }
+                .font(.callout).foregroundStyle(.secondary)
+                UsageBar(fraction: fraction, tint: MetricStyle.disk.tint)
+                Spacer(minLength: 0)
+                FooterStats(stats: [
+                    .init(label: "Used", value: Format.bytesShort(d.usedBytes), dot: MetricStyle.disk.tint),
+                    .init(label: "Free", value: Format.bytesShort(d.availableBytes), dot: .secondary),
+                    .init(label: "Capacity", value: Format.bytesShort(d.totalBytes)),
+                ])
+            } else {
+                BigValue(nil)
             }
         }
     }
 
     private func batteryCard(_ b: BatteryReading) -> some View {
-        Card(title: "Battery", symbol: "battery.75percent", health: nil) {
+        MetricCard(title: "Battery", style: .battery, health: b.condition?.health) {
             BigValue(Format.percent(b.percent))
-            Text(Format.batteryState(b)).font(.caption).foregroundStyle(.secondary)
-            Detail("Cycle count", b.cycleCount.map(String.init))
-            Detail("Max capacity", b.maximumCapacityPercent.map(Format.percent))
+            Text(batteryLine(b)).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            Sparkline(values: metrics.batteryHistory.values, tint: MetricStyle.battery.tint, points: 120, domain: 0...100)
+            FooterStats(stats: [
+                .init(label: "Cycles", value: b.cycleCount.map(String.init)),
+                .init(label: "Condition", value: b.condition.map(Format.batteryCondition)),
+                .init(label: "Capacity", value: b.maximumCapacityPercent.map(Format.percent)),
+            ])
         }
     }
 
-    /// Mockup "Recent Activity": latest events since launch; the Timeline section has full history.
+    private func batteryLine(_ b: BatteryReading) -> String {
+        guard let minutes = b.minutesRemaining else { return Format.batteryState(b) }
+        return b.isCharging ? "\(Format.duration(minutes: minutes)) until full" : "\(Format.duration(minutes: minutes)) remaining"
+    }
+
+    private var temperatureCard: some View {
+        let s = metrics.sensors
+        return MetricCard(title: "Temperature", style: .temperature, health: metrics.thermal?.health) {
+            BigValue(s?.cpuCelsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal))
+            Text(s?.cpuCelsius != nil ? "CPU · thermal state \(metrics.thermal.map(Format.thermal) ?? "–")" : "macOS thermal state")
+                .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint)
+            if let s, !s.isEmpty {
+                FooterStats(stats: [
+                    .init(label: "CPU", value: s.cpuCelsius.map(Format.celsius)),
+                    .init(label: "SSD", value: s.ssdCelsius.map(Format.celsius)),
+                    .init(label: "Battery", value: s.batteryCelsius.map(Format.celsius)),
+                    .init(label: "Fan rpm", value: s.fans.max(by: { $0.rpm < $1.rpm }).map { $0.rpm < 1 ? "Off" : "\(Int($0.rpm.rounded()))" }),
+                ])
+            }
+        }
+    }
+
+    private var internetCard: some View {
+        let h = metrics.networkHealth
+        return MetricCard(title: "Internet Health", style: .internet, health: h?.health,
+                          healthLabel: h?.connectivity == .offline ? "Offline" : nil) {
+            Text(internetMessage(h)).font(.callout).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Divider()
+            HStack(alignment: .top) {
+                internetStat(value: h.map(MenuBarFormatter.latency) ?? "--", label: "Ping",
+                             icon: "circle.fill", tint: h?.health.tint ?? .secondary)
+                Divider()
+                internetStat(value: metrics.network.map { Format.rate($0.downBytesPerSec) } ?? "--", label: "Download",
+                             icon: "arrow.down", tint: MetricStyle.network.tint)
+                Divider()
+                internetStat(value: metrics.network.map { Format.rate($0.upBytesPerSec) } ?? "--", label: "Upload",
+                             icon: "arrow.up", tint: MetricStyle.upload.tint)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func internetStat(value: String, label: String, icon: String, tint: Color) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).foregroundStyle(tint).font(icon == "circle.fill" ? .system(size: 8) : .callout)
+                Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+            }
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func internetMessage(_ h: NetworkHealthReading?) -> String {
+        guard let h else { return "Checking your connection…" }
+        if h.connectivity == .offline { return "This Mac is offline." }
+        switch h.health {
+        case .healthy: return "Your connection looks good."
+        case .warning: return "Your connection is slower than usual."
+        case .critical: return "Your connection has serious problems."
+        case .unknown: return "Checking your connection…"
+        }
+    }
+
+    /// Mockup "Recent Activity": latest events since launch; "View All" opens the Timeline.
     private var recentActivity: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Recent Activity", systemImage: "clock").font(.headline)
-            let latest = Array(metrics.recentEvents.suffix(6).reversed())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: MetricStyle.timeline.symbol).foregroundStyle(.secondary).font(.title3).frame(width: 24)
+                Text("Recent Activity").font(.headline)
+                Spacer()
+                Button("View All", action: showTimeline).controlSize(.small)
+            }
+            let latest = Array(metrics.recentEvents.suffix(5).reversed())
             if latest.isEmpty {
                 Text("Nothing notable yet.").foregroundStyle(.secondary)
             } else {
-                ForEach(latest) { EventRow(event: $0) }
+                ForEach(latest) { EventRow(event: $0).font(.callout) }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardBackground()
     }
+}
 
-    private var thermalCard: some View {
-        Card(title: "Temperature", symbol: "thermometer.medium", health: metrics.thermal?.health) {
-            BigValue(metrics.sensors?.cpuCelsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal))
-            Text(metrics.sensors?.cpuCelsius != nil ? "CPU · thermal state \(metrics.thermal.map(Format.thermal) ?? "–")"
-                                                     : "macOS thermal state").font(.caption).foregroundStyle(.secondary)
-            if let s = metrics.sensors {
-                Detail("SSD", s.ssdCelsius.map(Format.celsius))
-                if let fan = s.fans.max(by: { $0.rpm < $1.rpm }) {
-                    Detail("Fan", fan.rpm < 1 ? "Stopped" : "\(Int(fan.rpm.rounded())) rpm")
-                }
+/// Rounded usage bar (mockup disk bar).
+struct UsageBar: View {
+    let fraction: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule().fill(LinearGradient(colors: [tint.opacity(0.8), tint], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: geo.size.width * min(max(fraction, 0), 1))
             }
-            if let gpu = metrics.gpu { Detail("GPU load", Format.percent(gpu.utilizationPercent)) }
         }
-    }
-}
-
-private struct Card<Content: View>: View {
-    let title: String
-    let symbol: String
-    let health: HealthLevel?
-    var healthLabel: String?
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label(title, systemImage: symbol).font(.headline)
-                Spacer()
-                if let health { HealthBadge(level: health, label: healthLabel) }
-            }
-            content
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
-    }
-}
-
-private struct BigValue: View {
-    let text: String?
-    init(_ text: String?) { self.text = text }
-
-    var body: some View {
-        Text(text ?? "--").font(.title2.weight(.semibold)).monospacedDigit()
-    }
-}
-
-private struct Detail: View {
-    let title: String
-    let value: String?
-    init(_ title: String, _ value: String?) {
-        self.title = title
-        self.value = value
-    }
-
-    var body: some View {
-        HStack {
-            Text(title).foregroundStyle(.secondary)
-            Spacer()
-            Text(value ?? "--").monospacedDigit()
-        }
-        .font(.callout)
-    }
-}
-
-private struct Sparkline: View {
-    let values: [Double]
-    /// Fixed top of the y-axis (e.g. 100 for percentages); nil scales to the data.
-    let maximum: Double?
-
-    var body: some View {
-        Chart(Array(values.enumerated()), id: \.offset) { point in
-            AreaMark(x: .value("t", point.offset), y: .value("v", point.element))
-                .foregroundStyle(.tint.opacity(0.2))
-            LineMark(x: .value("t", point.offset), y: .value("v", point.element))
-                .lineStyle(StrokeStyle(lineWidth: 1.2))
-        }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartXScale(domain: 0...59)
-        .chartYScale(domain: 0...(maximum ?? max(values.max() ?? 1, 1)))
-        .frame(height: 40)
+        .frame(height: 10)
+        .accessibilityElement()
+        .accessibilityLabel("Used")
+        .accessibilityValue(Format.percent(fraction * 100))
     }
 }

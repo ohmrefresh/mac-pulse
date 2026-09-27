@@ -19,6 +19,11 @@ final class AppSettings {
         }
     }
 
+    /// SF Symbol before each menu-bar item (on by default; off saves menu-bar space on notched Macs).
+    var menuBarShowsIcons: Bool {
+        didSet { save(menuBarShowsIcons, .menuBarShowsIcons); onMenuBarChange?() }
+    }
+
     // Health thresholds (user-configurable, not hardcoded): CPU Health Level and diagnostics limits.
     var cpuWarningPercent: Double { didSet { save(cpuWarningPercent, .cpuWarningPercent); pushHealthConfig() } }
     var cpuCriticalPercent: Double { didSet { save(cpuCriticalPercent, .cpuCriticalPercent); pushHealthConfig() } }
@@ -101,6 +106,7 @@ final class AppSettings {
         let n = NetworkThresholds()
         menuBarItems = (defaults.stringArray(forKey: Key.menuBarItems.rawValue)?.compactMap(MenuBarItem.init(rawValue:)))
             ?? MenuBarItem.defaults
+        menuBarShowsIcons = defaults.object(forKey: Key.menuBarShowsIcons.rawValue) as? Bool ?? true
         samplingInterval = defaults.object(forKey: Key.samplingInterval.rawValue) as? TimeInterval ?? 1
         showDockIcon = defaults.bool(forKey: Key.showDockIcon.rawValue)
         pingTarget = defaults.string(forKey: Key.pingTarget.rawValue) ?? "1.1.1.1"
@@ -202,7 +208,7 @@ final class AppSettings {
     }
 
     private enum Key: String {
-        case menuBarItems, samplingInterval, showDockIcon, pingTarget
+        case menuBarItems, menuBarShowsIcons, samplingInterval, showDockIcon, pingTarget
         case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules, publicIPEnabled
         case cpuWarningPercent, cpuCriticalPercent, gatewayLatencyMs, dnsSlowMs, lowDiskGB, hotCPUCelsius
         case offeredTemplates

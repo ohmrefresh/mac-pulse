@@ -18,6 +18,20 @@ import PulseCollectors
         #expect(m.thermalChanges.count == 50)
     }
 
+    @Test func batteryAndTemperatureHistoriesAndCPUHealth() {
+        let m = LiveMetrics()
+        var s = Snapshot()
+        s.battery = BatteryReading(percent: 80, isCharging: false, onACPower: false, minutesRemaining: nil,
+                                   cycleCount: nil, maximumCapacityPercent: nil)
+        s.sensors = SensorsReading(cpuCelsius: 52, ssdCelsius: nil, batteryCelsius: nil, sensors: [], fans: [])
+        s.cpu = CPUReading(totalPercent: 20, perCorePercent: [20])
+        m.apply(s)
+        #expect(m.batteryHistory.values == [80])
+        #expect(m.temperatureHistory.values == [52])
+        #expect(m.cpuHealth == .healthy)
+        #expect(m.cpuFiveMinutePeak == 20)
+    }
+
     @Test func latencyHistoryMarksTimeoutsAndSkipsOffline() {
         let m = LiveMetrics()
         let t = NetworkThresholds()

@@ -4,11 +4,23 @@ import PulseEngine
 
 struct ProcessesView: View {
     let metrics: LiveMetrics
-    @State private var search = ""
+    /// Dashboard toolbar search.
+    let search: String
     @State private var sortOrder = [KeyPathComparator(\ProcessRow.cpuPercent, order: .reverse)]
     @State private var icons = IconCache()
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            PageHeader("Processes", subtitle: search.isEmpty ? "\(metrics.processes.count) processes"
+                                                             : "\(rows.count) of \(metrics.processes.count) processes match “\(search)”")
+                .padding([.horizontal, .top], 24)
+            table
+        }
+        .onAppear(perform: metrics.processListAppeared)
+        .onDisappear(perform: metrics.processListDisappeared)
+    }
+
+    private var table: some View {
         Table(rows, sortOrder: $sortOrder) {
             TableColumn("Name", value: \.name) { row in
                 HStack(spacing: 6) {
@@ -38,11 +50,6 @@ struct ProcessesView: View {
             }
             .width(120)
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
-        .navigationTitle("Processes")
-        .navigationSubtitle("\(metrics.processes.count) processes")
-        .onAppear(perform: metrics.processListAppeared)
-        .onDisappear(perform: metrics.processListDisappeared)
     }
 
     private var rows: [ProcessRow] {
@@ -56,18 +63,4 @@ struct ProcessesView: View {
 private extension ProcessRow {
     var userSortKey: String { user ?? "" }
     var startSortKey: Date { startTime ?? .distantPast }
-}
-
-/// App icons for GUI processes, generic executable icon otherwise. Looked up once per PID.
-@MainActor
-private final class IconCache {
-    private var cache: [Int32: NSImage] = [:]
-    private let generic = NSWorkspace.shared.icon(for: .unixExecutable)
-
-    func icon(for pid: Int32) -> NSImage {
-        if let cached = cache[pid] { return cached }
-        let icon = NSRunningApplication(processIdentifier: pid)?.icon ?? generic
-        cache[pid] = icon
-        return icon
-    }
 }

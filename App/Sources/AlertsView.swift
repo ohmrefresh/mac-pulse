@@ -10,6 +10,16 @@ struct AlertsView: View {
     @State private var stored: [TimelineEvent] = []
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PageHeader("Alerts", subtitle: "Rules that notify you when something needs attention.")
+                .padding([.horizontal, .top], 24)
+            form
+        }
+        .task { await notifier.refreshAuthorization() }
+        .task { await loadStored() }
+    }
+
+    private var form: some View {
         Form {
             if notifier.authorization == .denied {
                 Section {
@@ -44,9 +54,6 @@ struct AlertsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Alerts")
-        .task { await notifier.refreshAuthorization() }
-        .task { await loadStored() }
     }
 
     /// Stored alert events plus live ones not yet flushed, newest first.
@@ -75,7 +82,7 @@ private struct RuleRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Toggle("", isOn: $rule.isEnabled).toggleStyle(.switch).labelsHidden()
-                TextField("Name", text: $rule.name).font(.headline).textFieldStyle(.plain)
+                TextField("Name", text: $rule.name).font(.headline).textFieldStyle(.plain).labelsHidden()
                 if isFiring { HealthBadge(level: rule.severity.health, label: "Firing") }
                 Spacer()
                 Picker("", selection: $rule.severity) {

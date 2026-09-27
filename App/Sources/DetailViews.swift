@@ -5,8 +5,8 @@ import PulseCollectors
 import PulseEngine
 import PulseStore
 
-// Section screens for the dashboard (PRD §16). History here is the in-memory last few minutes;
-// longer ranges arrive with PulseStore in v1.0.
+// Section screens for the dashboard (PRD §16). "Live" charts use the in-memory last few minutes;
+// other ranges read PulseStore history.
 
 struct PerformanceView: View {
     let metrics: LiveMetrics
@@ -14,15 +14,15 @@ struct PerformanceView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                ChartRangePicker(range: $range)
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(title: "Performance", subtitle: "CPU, GPU and memory over time.") { ChartRangePicker(range: $range) }
                 Section2(title: "CPU", subtitle: metrics.processorName) {
                     Group {
                         if range == .live {
-                            TimeSeriesChart(series: [.init(name: "CPU", values: metrics.cpuHistory.values)],
+                            TimeSeriesChart(series: [.init(name: "CPU", values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint)],
                                             interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
                         } else {
-                            HistoryChart(history: metrics.history, lines: [.init(kind: .cpuPercent, name: "CPU")],
+                            HistoryChart(history: metrics.history, lines: [.init(kind: .cpuPercent, name: "CPU", tint: MetricStyle.cpu.tint)],
                                          range: range, maximum: 100, format: { "\(Int($0))%" })
                         }
                     }
@@ -34,13 +34,13 @@ struct PerformanceView: View {
                 Section2(title: "GPU", subtitle: metrics.gpu.map { "\(Format.percent($0.utilizationPercent)) now" }) {
                     if range == .live {
                         if let g = metrics.gpu {
-                            ProgressView(value: g.utilizationPercent, total: 100)
+                            UsageBar(fraction: g.utilizationPercent / 100, tint: MetricStyle.gpu.tint)
                             if let mem = g.memoryInUseBytes { Text("GPU memory in use: \(Format.memory(mem))").font(.caption).foregroundStyle(.secondary) }
                         } else {
                             Text("No GPU data").foregroundStyle(.secondary)
                         }
                     } else {
-                        HistoryChart(history: metrics.history, lines: [.init(kind: .gpuPercent, name: "GPU")],
+                        HistoryChart(history: metrics.history, lines: [.init(kind: .gpuPercent, name: "GPU", tint: MetricStyle.gpu.tint)],
                                      range: range, maximum: 100, format: { "\(Int($0))%" })
                             .frame(height: 140)
                     }
@@ -48,10 +48,10 @@ struct PerformanceView: View {
                 Section2(title: "Memory", subtitle: metrics.memory.map { "\(Format.memory($0.totalBytes)) installed" }) {
                     Group {
                         if range == .live {
-                            TimeSeriesChart(series: [.init(name: "Used", values: metrics.memoryHistory.values)],
+                            TimeSeriesChart(series: [.init(name: "Used", values: metrics.memoryHistory.values, tint: MetricStyle.memory.tint)],
                                             interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
                         } else {
-                            HistoryChart(history: metrics.history, lines: [.init(kind: .memoryPercent, name: "Used")],
+                            HistoryChart(history: metrics.history, lines: [.init(kind: .memoryPercent, name: "Used", tint: MetricStyle.memory.tint)],
                                          range: range, maximum: 100, format: { "\(Int($0))%" })
                         }
                     }
@@ -68,9 +68,8 @@ struct PerformanceView: View {
                     }
                 }
             }
-            .padding(20)
+            .padding(24)
         }
-        .navigationTitle("Performance")
     }
 }
 
@@ -80,6 +79,7 @@ private struct PerCoreBars: View {
     var body: some View {
         Chart(Array(values.enumerated()), id: \.offset) { index, value in
             BarMark(x: .value("Core", "\(index + 1)"), y: .value("Usage", value))
+                .foregroundStyle(MetricStyle.cpu.tint.gradient)
         }
         .chartYScale(domain: 0...100)
         .chartYAxis { AxisMarks(values: [0, 50, 100]) { v in AxisGridLine(); AxisValueLabel { Text("\(v.as(Int.self) ?? 0)%") } } }
@@ -93,19 +93,19 @@ struct NetworkDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                ChartRangePicker(range: $range)
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(title: "Network", subtitle: "Throughput, latency and connection health.") { ChartRangePicker(range: $range) }
                 Section2(title: "Throughput", subtitle: metrics.network?.interface.map { "Interface \($0)" } ?? "No connection") {
                     Group {
                         if range == .live {
-                            TimeSeriesChart(series: [.init(name: "Download", values: metrics.downHistory.values),
-                                                     .init(name: "Upload", values: metrics.upHistory.values)],
+                            TimeSeriesChart(series: [.init(name: "Download", values: metrics.downHistory.values, tint: MetricStyle.network.tint),
+                                                     .init(name: "Upload", values: metrics.upHistory.values, tint: MetricStyle.upload.tint)],
                                             interval: metrics.samplingInterval,
                                             format: { MenuBarFormatter.rate($0) + "/s" })
                         } else {
                             HistoryChart(history: metrics.history,
-                                         lines: [.init(kind: .networkDownBytesPerSec, name: "Download"),
-                                                 .init(kind: .networkUpBytesPerSec, name: "Upload")],
+                                         lines: [.init(kind: .networkDownBytesPerSec, name: "Download", tint: MetricStyle.network.tint),
+                                                 .init(kind: .networkUpBytesPerSec, name: "Upload", tint: MetricStyle.upload.tint)],
                                          range: range, format: { MenuBarFormatter.rate($0) + "/s" })
                         }
                     }
@@ -114,14 +114,14 @@ struct NetworkDetailView: View {
                 Section2(title: "Latency", subtitle: range == .live ? "Probe every 5 s · gaps are timeouts" : "Internet, second target, gateway and DNS") {
                     Group {
                         if range == .live {
-                            TimeSeriesChart(series: [.init(name: "Latency", values: metrics.latencyHistory.values)],
+                            TimeSeriesChart(series: [.init(name: "Latency", values: metrics.latencyHistory.values, tint: MetricStyle.internet.tint)],
                                             interval: 5, format: { "\(Int($0)) ms" })
                         } else {
                             HistoryChart(history: metrics.history,
-                                         lines: [.init(kind: .latencyMs, name: "Internet"),
-                                                 .init(kind: .secondaryLatencyMs, name: "Second target"),
-                                                 .init(kind: .gatewayLatencyMs, name: "Gateway"),
-                                                 .init(kind: .dnsLatencyMs, name: "DNS")],
+                                         lines: [.init(kind: .latencyMs, name: "Internet", tint: MetricStyle.internet.tint),
+                                                 .init(kind: .secondaryLatencyMs, name: "Second target", tint: .cyan),
+                                                 .init(kind: .gatewayLatencyMs, name: "Gateway", tint: .orange),
+                                                 .init(kind: .dnsLatencyMs, name: "DNS", tint: .purple)],
                                          range: range, format: { "\(Int($0)) ms" })
                         }
                     }
@@ -143,9 +143,8 @@ struct NetworkDetailView: View {
                     }
                 }
             }
-            .padding(20)
+            .padding(24)
         }
-        .navigationTitle("Network")
     }
 
     @ViewBuilder
@@ -162,11 +161,12 @@ struct StorageView: View {
     let metrics: LiveMetrics
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 20) {
+            PageHeader("Storage", subtitle: "Startup disk capacity.")
             if let d = metrics.disk {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text(d.volumeName ?? "Startup disk").font(.title3.weight(.semibold))
-                    ProgressView(value: Double(d.usedBytes), total: Double(max(d.totalBytes, 1)))
+                    UsageBar(fraction: Double(d.usedBytes) / Double(max(d.totalBytes, 1)), tint: MetricStyle.disk.tint)
                     Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
                         KeyValue("Capacity", Format.bytes(d.totalBytes))
                         KeyValue("Used", Format.bytes(d.usedBytes))
@@ -174,14 +174,15 @@ struct StorageView: View {
                     }
                     Text("Available includes purgeable space, matching Finder. Refreshed every 60 s.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
                 }
-                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardBackground()
             } else {
                 ContentUnavailableView("No disk data yet", systemImage: "internaldrive")
             }
+            Spacer()
         }
-        .navigationTitle("Storage")
+        .padding(24)
     }
 }
 
@@ -189,34 +190,40 @@ struct BatteryView: View {
     let metrics: LiveMetrics
 
     var body: some View {
-        Group {
-            if let b = metrics.battery {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text(Format.percent(b.percent)).font(.largeTitle.weight(.semibold)).monospacedDigit()
-                    ProgressView(value: b.percent, total: 100)
-                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
-                        KeyValue("State", Format.batteryState(b))
-                        KeyValue("Cycle count", b.cycleCount.map(String.init) ?? "--")
-                        KeyValue("Maximum capacity", b.maximumCapacityPercent.map(Format.percent) ?? "--")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader("Battery", subtitle: "Charge, wear and accessory batteries.")
+                if let b = metrics.battery {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(Format.percent(b.percent)).font(.largeTitle.weight(.semibold)).monospacedDigit()
+                            Spacer()
+                            if let c = b.condition { HealthBadge(level: c.health, label: Format.batteryCondition(c)) }
+                        }
+                        Sparkline(values: metrics.batteryHistory.values, tint: MetricStyle.battery.tint,
+                                  points: 120, domain: 0...100, height: 70)
+                        Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
+                            KeyValue("State", Format.batteryState(b))
+                            KeyValue("Condition", b.condition.map(Format.batteryCondition) ?? "--")
+                            KeyValue("Cycle count", b.cycleCount.map(String.init) ?? "--")
+                            KeyValue("Maximum capacity", b.maximumCapacityPercent.map(Format.percent) ?? "--")
+                        }
                     }
-                    peripherals
-                    Spacer()
-                }
-                .padding(20)
-            } else {
-                VStack(alignment: .leading, spacing: 16) {
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardBackground()
+                } else {
                     Text("This Mac has no internal battery.").foregroundStyle(.secondary)
-                    peripherals
-                    Spacer()
                 }
-                .padding(20)
+                VStack(alignment: .leading, spacing: 8) { peripherals }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .cardBackground()
             }
+            .padding(24)
         }
-        .navigationTitle("Battery")
     }
 
     @ViewBuilder private var peripherals: some View {
-        Text("Accessories").font(.headline).padding(.top, 8)
+        Text("Accessories").font(.headline)
         if metrics.peripheralBatteries.isEmpty {
             Text("No Bluetooth accessories reporting a battery level.").foregroundStyle(.secondary)
         } else {
@@ -233,6 +240,7 @@ struct SensorsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                PageHeader("Sensors", subtitle: "Thermal state, temperatures and fans.")
                 HStack(spacing: 12) {
                     Text(metrics.thermal.map(Format.thermal) ?? "--").font(.largeTitle.weight(.semibold))
                     if let t = metrics.thermal { HealthBadge(level: t.health) }
@@ -265,6 +273,9 @@ struct SensorsView: View {
                 } else {
                     ProgressView().controlSize(.small)
                 }
+                if !metrics.temperatureHistory.values.isEmpty {
+                    Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 70)
+                }
 
                 Text("Thermal state changes").font(.headline).padding(.top, 8)
                 if metrics.thermalChanges.isEmpty {
@@ -280,9 +291,8 @@ struct SensorsView: View {
                     }
                 }
             }
-            .padding(20)
+            .padding(24)
         }
-        .navigationTitle("Sensors")
         .onAppear(perform: metrics.sensorsAppeared)
         .onDisappear(perform: metrics.sensorsDisappeared)
     }
@@ -297,12 +307,11 @@ private struct Section2<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.title3.weight(.semibold))
-                if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
-            }
+            SubsectionHeader(title, subtitle: subtitle)
             content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardBackground()
     }
 }
 

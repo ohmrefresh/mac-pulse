@@ -39,23 +39,45 @@ public enum MenuBarFormatter {
     /// PRD §5 Level 1 style, e.g. "CPU 21% | MEM 62% | ↓8.4M ↑1.2M | 18ms". Missing readings render as "--".
     /// Battery is omitted on Macs without one.
     public static func text(_ items: [MenuBarItem], _ inputs: MenuBarInputs) -> String {
-        items.compactMap { segment($0, inputs) }.joined(separator: " | ")
+        segments(items, inputs).map(\.text).joined(separator: separator)
+    }
+
+    public static let separator = " | "
+
+    /// The rendered segments, in order, for callers that decorate each one (e.g. with an icon).
+    public static func segments(_ items: [MenuBarItem], _ inputs: MenuBarInputs) -> [(item: MenuBarItem, text: String)] {
+        items.compactMap { item in segment(item, inputs).map { (item, $0) } }
     }
 
     /// Longest string each item can render, for sizing a fixed-width status item.
     public static func widestText(_ items: [MenuBarItem]) -> String {
-        items.map { item in
-            switch item {
-            case .cpu: "CPU 100%"
-            case .memory: "MEM 100%"
-            case .network: "↓999M ↑999M"
-            case .latency: "9999ms"
-            case .battery: "BAT 100%"
-            case .thermal: "Critical"
-            case .temperature: "100°C"
-            case .gpu: "GPU 100%"
-            }
-        }.joined(separator: " | ")
+        items.map(widestSegment).joined(separator: separator)
+    }
+
+    public static func widestSegment(_ item: MenuBarItem) -> String {
+        switch item {
+        case .cpu: "CPU 100%"
+        case .memory: "MEM 100%"
+        case .network: "↓999M ↑999M"
+        case .latency: "9999ms"
+        case .battery: "BAT 100%"
+        case .thermal: "Critical"
+        case .temperature: "100°C"
+        case .gpu: "GPU 100%"
+        }
+    }
+
+    /// SF Symbol shown before an item's text when menu-bar icons are on.
+    public static func symbol(for item: MenuBarItem) -> String {
+        switch item {
+        case .cpu: "cpu"
+        case .memory: "memorychip"
+        case .network: "arrow.up.arrow.down"
+        case .latency: "globe"
+        case .battery: "battery.75percent"
+        case .thermal, .temperature: "thermometer.medium"
+        case .gpu: "square.stack.3d.up"
+        }
     }
 
     static func segment(_ item: MenuBarItem, _ i: MenuBarInputs) -> String? {

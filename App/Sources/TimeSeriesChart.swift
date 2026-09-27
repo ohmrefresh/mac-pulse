@@ -6,6 +6,7 @@ struct TimeSeriesChart: View {
     struct Series: Identifiable {
         let name: String
         let values: [Double]
+        var tint: Color = .accentColor
         var id: String { name }
     }
 
@@ -21,6 +22,12 @@ struct TimeSeriesChart: View {
             ForEach(series) { s in
                 ForEach(Array(s.values.enumerated()), id: \.offset) { index, value in
                     if !value.isNaN {
+                        if series.count == 1 {
+                            AreaMark(x: .value("Seconds ago", -Double(s.values.count - 1 - index) * interval),
+                                     y: .value(s.name, value))
+                                .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.3), s.tint.opacity(0.02)],
+                                                                startPoint: .top, endPoint: .bottom))
+                        }
                         LineMark(
                             x: .value("Seconds ago", -Double(s.values.count - 1 - index) * interval),
                             y: .value(s.name, value),
@@ -32,6 +39,7 @@ struct TimeSeriesChart: View {
                 }
             }
         }
+        .chartForegroundStyleScale(domain: series.map(\.name), range: series.map(\.tint))
         .chartYScale(domain: 0...yTop)
         .chartYAxis {
             AxisMarks { value in

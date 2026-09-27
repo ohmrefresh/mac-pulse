@@ -32,6 +32,12 @@ public final class LiveMetrics {
     public private(set) var memoryHistory = RecentSeries(capacity: 300)
     public private(set) var downHistory = RecentSeries(capacity: 300)
     public private(set) var upHistory = RecentSeries(capacity: 300)
+    /// Battery percent per battery sample (5 s cadence → 10 min).
+    public private(set) var batteryHistory = RecentSeries(capacity: 120)
+    /// CPU °C per sensor sample (5–60 s cadence depending on visibility).
+    public private(set) var temperatureHistory = RecentSeries(capacity: 60)
+    /// Debounced CPU Health Level from the user's CPU thresholds; matches the timeline.
+    public private(set) var cpuHealth: HealthLevel?
     /// Internet round trip per probe (5 s cadence → 5 min). Timeouts are stored as NaN so charts show gaps.
     public private(set) var latencyHistory = RecentSeries(capacity: 60)
     /// Thermal state changes, newest last, capped at 50.
@@ -212,6 +218,11 @@ public final class LiveMetrics {
         return recent.isEmpty ? nil : recent.reduce(0, +) / Double(recent.count)
     }
 
+    /// Highest CPU % over the last 5 minutes of wall time.
+    public var cpuFiveMinutePeak: Double? {
+        cpuHistory.suffix(max(1, Int((300 / samplingInterval).rounded()))).max()
+    }
+
     public var menuBarInputs: MenuBarInputs {
         MenuBarInputs(cpu: cpu, memory: memory, network: network, networkHealth: networkHealth,
                       battery: battery, thermal: thermal, cpuCelsius: sensors?.cpuCelsius, gpuPercent: gpu?.utilizationPercent)
@@ -293,17 +304,21 @@ public final class LiveMetrics {
             upHistory.append(v.upBytesPerSec)
         }
         if let v = s.disk { disk = v }
-        if let v = s.battery { battery = v }
+        if let v = s.battery { battery = v; batteryHistory.append(v.percent) }
         if let v = s.thermal {
             if v != thermal { recordThermalChange(v, at: Date()) }
             thermal = v
         }
         if let v = s.processes { processes = v }
         if let v = s.gpu { gpu = v }
-        if let v = s.sensors { sensors = v }
+        if let v = s.sensors {
+            sensors = v
+            if let c = v.cpuCelsius { temperatureHistory.append(c) }
+        }
         if let v = s.peripheralBatteries { peripheralBatteries = v }
         let now = Date()
         for event in timeline.observe(s, at: now) { post(event) }
+        if s.cpu != nil { cpuHealth = timeline.reportedHealth(.cpu) }
         evaluateAlerts(Self.alertValues(s), at: now)
     }
 

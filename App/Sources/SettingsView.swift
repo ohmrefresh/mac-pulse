@@ -35,6 +35,8 @@ struct SettingsView: View {
 
     private var menuBar: some View {
         Form {
+            Toggle("Show icons", isOn: $settings.menuBarShowsIcons)
+            Divider()
             ForEach(MenuBarItem.allCases, id: \.self) { item in
                 Toggle(label(item), isOn: Binding(get: { settings.isEnabled(item) },
                                                   set: { settings.setEnabled(item, $0) }))

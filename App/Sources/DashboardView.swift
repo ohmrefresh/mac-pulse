@@ -15,20 +15,22 @@ enum DashboardSection: String, CaseIterable, Identifiable {
 
     var id: Self { self }
 
-    var symbol: String {
+    var style: MetricStyle {
         switch self {
-        case .overview: "house"
-        case .performance: "cpu"
-        case .network: "arrow.up.arrow.down"
-        case .processes: "list.bullet.rectangle"
-        case .developer: "hammer"
-        case .storage: "internaldrive"
-        case .battery: "battery.75percent"
-        case .sensors: "thermometer.medium"
-        case .timeline: "clock"
-        case .alerts: "bell"
+        case .overview: .internet
+        case .performance: .cpu
+        case .network: .network
+        case .processes: .processes
+        case .developer: .developer
+        case .storage: .disk
+        case .battery: .battery
+        case .sensors: .temperature
+        case .timeline: .timeline
+        case .alerts: .alerts
         }
     }
+
+    var symbol: String { self == .overview ? "house" : style.symbol }
 
     /// PRD §17: ⌘1–⌘4.
     var shortcut: KeyEquivalent? {
@@ -48,13 +50,20 @@ struct DashboardView: View {
     let notifier: AlertNotifier
     @State private var selection: DashboardSection? = .overview
     @State private var showDiagnostics = false
+    /// Toolbar search; typing jumps to Processes, which filters by it.
+    @State private var search = ""
 
     var body: some View {
         NavigationSplitView {
             List(DashboardSection.allCases, selection: $selection) { section in
-                Label(section.rawValue, systemImage: section.symbol)
+                Label {
+                    Text(section.rawValue)
+                } icon: {
+                    Image(systemName: section.symbol).foregroundStyle(section.style.tint)
+                }
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            .safeAreaInset(edge: .top) { sidebarHeader }
             .background { shortcutButtons }
             .safeAreaInset(edge: .bottom) {
                 SettingsLink { Label("Settings", systemImage: "gearshape") }
@@ -64,10 +73,11 @@ struct DashboardView: View {
             }
         } detail: {
             switch selection ?? .overview {
-            case .overview: OverviewView(metrics: metrics)
+            case .overview: OverviewView(metrics: metrics, runDiagnostics: { showDiagnostics = true },
+                                         showTimeline: { selection = .timeline })
             case .performance: PerformanceView(metrics: metrics)
             case .network: NetworkDetailView(metrics: metrics)
-            case .processes: ProcessesView(metrics: metrics)
+            case .processes: ProcessesView(metrics: metrics, search: search)
             case .developer: DeveloperView(metrics: metrics, settings: settings)
             case .storage: StorageView(metrics: metrics)
             case .battery: BatteryView(metrics: metrics)
@@ -76,16 +86,26 @@ struct DashboardView: View {
             case .timeline: TimelineSectionView(metrics: metrics)
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                // PRD §17 ⌘R.
-                Button { showDiagnostics = true } label: { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .help("Run Diagnostics (⌘R)")
-            }
+        .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
+        .onChange(of: search) { _, query in
+            if !query.isEmpty { selection = .processes }
         }
+        .modifier(HiddenToolbarTitle())
         .sheet(isPresented: $showDiagnostics) { DiagnosticsView(metrics: metrics) }
-        .frame(minWidth: 820, minHeight: 560)
+        .frame(minWidth: 980, minHeight: 620)
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: 10) {
+            AppLogo(size: 36)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Mac Pulse").font(.headline)
+                Text("System Monitoring for macOS").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     private var shortcutButtons: some View {
@@ -94,11 +114,26 @@ struct DashboardView: View {
                 Button(section.rawValue) { selection = section }
                     .keyboardShortcut(section.shortcut!, modifiers: .command)
             }
+            // PRD §17 ⌘R from any section.
+            Button("Run Diagnostics") { showDiagnostics = true }
+                .keyboardShortcut("r", modifiers: .command)
             // PRD §17 ⌘K search. macOS 14 cannot focus a search field programmatically
-            // (`searchFocused` is macOS 15+), so this opens Processes, whose search is in the toolbar.
+            // (`searchFocused` is macOS 15+), so this opens Processes, which the toolbar search filters.
             Button("Search") { selection = .processes }
                 .keyboardShortcut("k", modifiers: .command)
         }
         .hidden()
+    }
+}
+
+/// Sections draw their own large titles. macOS 15 can drop the toolbar title; on 14 AppKit's
+/// `titleVisibility = .hidden` (set on the window) is the only lever.
+private struct HiddenToolbarTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
     }
 }

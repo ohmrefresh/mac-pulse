@@ -17,7 +17,11 @@ Whether the Mac can reach the network at all: Online or Offline. Offline forces 
 _Avoid_: network status
 
 **Health Mapping**:
-The fixed translation from a source scale to Health Level — thermal Nominal/Fair→Healthy, Serious→Warning, Critical→Critical; memory pressure Normal/Warning/Critical one-to-one.
+The fixed translation from a source scale to Health Level — thermal Nominal/Fair→Healthy, Serious→Warning, Critical→Critical; memory pressure Normal/Warning/Critical one-to-one; Battery Condition Normal→Healthy, Service Recommended→Warning.
+
+**Battery Condition**:
+macOS's own verdict on battery wear: Normal or Service Recommended. Independent of charge level.
+_Avoid_: battery health (for charge level)
 
 **Thermal State**:
 macOS's own four-step thermal scale (Nominal, Fair, Serious, Critical). The only thermal signal in v1.0.

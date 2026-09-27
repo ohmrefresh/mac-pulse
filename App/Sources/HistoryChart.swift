@@ -38,6 +38,7 @@ struct HistoryChart: View {
     struct Line: Hashable {
         let kind: MetricKind
         let name: String
+        var tint: Color = .accentColor
     }
 
     let history: HistoryStore?
@@ -91,6 +92,7 @@ struct HistoryChart: View {
                 }
             }
         }
+        .chartForegroundStyleScale(domain: lines.map(\.name), range: lines.map(\.tint))
         .chartXScale(domain: Date().addingTimeInterval(-range.rawValue)...Date())
         .chartYScale(domain: 0...yTop)
         .chartYAxis {

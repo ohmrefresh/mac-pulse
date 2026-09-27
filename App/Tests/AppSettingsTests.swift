@@ -16,6 +16,7 @@ import PulseEngine
     @Test func defaultsMatchPlan() {
         let s = AppSettings(metrics: LiveMetrics(), defaults: freshDefaults())
         #expect(s.menuBarItems == MenuBarItem.defaults)
+        #expect(s.menuBarShowsIcons)
         #expect(s.samplingInterval == 1)
         #expect(!s.publicIPEnabled)
         #expect(s.cpuWarningPercent == 80 && s.cpuCriticalPercent == 95)
@@ -27,6 +28,7 @@ import PulseEngine
         let d = freshDefaults()
         let a = AppSettings(metrics: LiveMetrics(), defaults: d)
         a.menuBarItems = [.cpu, .temperature]
+        a.menuBarShowsIcons = false
         a.samplingInterval = 5
         a.cpuWarningPercent = 70
         a.dnsSlowMs = 350
@@ -38,6 +40,7 @@ import PulseEngine
 
         let b = AppSettings(metrics: LiveMetrics(), defaults: d)
         #expect(b.menuBarItems == [.cpu, .temperature])
+        #expect(!b.menuBarShowsIcons)
         #expect(b.samplingInterval == 5 && b.cpuWarningPercent == 70 && b.dnsSlowMs == 350)
         #expect(b.pingTarget == "9.9.9.9" && b.retention == .sevenDays)
         #expect(b.alertRules[0].threshold == 75)

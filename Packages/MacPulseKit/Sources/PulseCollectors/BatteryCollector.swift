@@ -1,6 +1,7 @@
 import Foundation
 import IOKit
 import IOKit.ps
+import PulseCore
 
 public struct BatteryReading: Sendable, Equatable {
     public var percent: Double
@@ -11,15 +12,18 @@ public struct BatteryReading: Sendable, Equatable {
     public var cycleCount: Int?
     /// Full-charge capacity as a percentage of design capacity.
     public var maximumCapacityPercent: Double?
+    /// Nil when macOS does not report one.
+    public var condition: BatteryCondition?
 
     public init(percent: Double, isCharging: Bool, onACPower: Bool, minutesRemaining: Int?,
-                cycleCount: Int?, maximumCapacityPercent: Double?) {
+                cycleCount: Int?, maximumCapacityPercent: Double?, condition: BatteryCondition? = nil) {
         self.percent = percent
         self.isCharging = isCharging
         self.onACPower = onACPower
         self.minutesRemaining = minutesRemaining
         self.cycleCount = cycleCount
         self.maximumCapacityPercent = maximumCapacityPercent
+        self.condition = condition
     }
 }
 
@@ -60,8 +64,20 @@ public struct BatteryCollector: Sendable {
             onACPower: onAC,
             minutesRemaining: (onAC && !charging) ? nil : minutes,
             cycleCount: nil,
-            maximumCapacityPercent: nil
+            maximumCapacityPercent: nil,
+            condition: condition(description)
         )
+    }
+
+    /// "Good" is Normal; "Fair"/"Poor", or any health condition ("Check Battery", "Permanent Battery Failure"),
+    /// is what System Settings shows as Service Recommended.
+    static func condition(_ description: [String: Any]) -> BatteryCondition? {
+        if let c = description[kIOPSBatteryHealthConditionKey] as? String, !c.isEmpty { return .serviceRecommended }
+        switch description[kIOPSBatteryHealthKey] as? String {
+        case kIOPSGoodValue: return .normal
+        case kIOPSFairValue, kIOPSPoorValue: return .serviceRecommended
+        default: return nil
+        }
     }
 
     static func smartBatteryHealth() -> (cycleCount: Int?, maximumCapacityPercent: Double?) {

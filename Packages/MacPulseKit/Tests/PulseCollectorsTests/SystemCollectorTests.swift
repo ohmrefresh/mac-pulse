@@ -2,6 +2,7 @@ import Foundation
 import IOKit.ps
 import Testing
 @testable import PulseCollectors
+import PulseCore
 
 @Suite struct NetworkRateTests {
     private func counters(_ name: String = "en0", rx: UInt64, tx: UInt64) -> InterfaceCounters {
@@ -56,6 +57,18 @@ import Testing
 
     @Test func pluggedInNotChargingHasNoEstimate() throws {
         #expect(try #require(BatteryCollector.parse(description(state: kIOPSACPowerValue))).minutesRemaining == nil)
+    }
+
+    @Test func condition() throws {
+        #expect(try #require(BatteryCollector.parse(description())).condition == nil)
+        var d = description()
+        d[kIOPSBatteryHealthKey] = kIOPSGoodValue
+        #expect(try #require(BatteryCollector.parse(d)).condition == .normal)
+        d[kIOPSBatteryHealthKey] = kIOPSFairValue
+        #expect(try #require(BatteryCollector.parse(d)).condition == .serviceRecommended)
+        d[kIOPSBatteryHealthKey] = kIOPSGoodValue
+        d[kIOPSBatteryHealthConditionKey] = "Check Battery"
+        #expect(try #require(BatteryCollector.parse(d)).condition?.health == .warning)
     }
 
     @Test func ignoresNonInternalSources() {

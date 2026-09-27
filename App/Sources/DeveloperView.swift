@@ -10,14 +10,14 @@ struct DeveloperView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                PageHeader("Developer", subtitle: "Docker, local services, runtimes and network setup.")
                 docker
                 services
                 runtimes
                 network
             }
-            .padding(20)
+            .padding(24)
         }
-        .navigationTitle("Developer")
         .onAppear(perform: metrics.developerAppeared)
         .onDisappear(perform: metrics.developerDisappeared)
     }
@@ -25,7 +25,7 @@ struct DeveloperView: View {
     // MARK: Docker
 
     @ViewBuilder private var docker: some View {
-        SectionHeader("Docker", subtitle: metrics.developer.containers.map { list in
+        SubsectionHeader("Docker", subtitle: metrics.developer.containers.map { list in
             "\(list.filter(\.isRunning).count) running of \(list.count)"
         } ?? "Not running")
         if let containers = metrics.developer.containers {
@@ -51,7 +51,7 @@ struct DeveloperView: View {
     // MARK: Local services
 
     @ViewBuilder private var services: some View {
-        SectionHeader("Local services", subtitle: "Listening TCP ports")
+        SubsectionHeader("Local services", subtitle: "Listening TCP ports")
         if let ports = metrics.developer.ports {
             let names = Dictionary(metrics.processes.map { ($0.pid, $0.name) }, uniquingKeysWith: { a, _ in a })
             Table(ports) {
@@ -78,7 +78,7 @@ struct DeveloperView: View {
     // MARK: Runtimes
 
     @ViewBuilder private var runtimes: some View {
-        SectionHeader("Runtimes", subtitle: "Development processes running now")
+        SubsectionHeader("Runtimes", subtitle: "Development processes running now")
         let groups = runtimeGroups
         if groups.isEmpty {
             Text("None detected.").foregroundStyle(.secondary)
@@ -113,7 +113,7 @@ struct DeveloperView: View {
     // MARK: Network
 
     @ViewBuilder private var network: some View {
-        SectionHeader("Network setup", subtitle: nil)
+        SubsectionHeader("Network setup", subtitle: nil)
         let config = metrics.developer.networkConfig
         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
             GridRow {
@@ -140,22 +140,6 @@ struct DeveloperView: View {
                     }
                 }
             }
-        }
-    }
-}
-
-private struct SectionHeader: View {
-    let title: String
-    let subtitle: String?
-    init(_ title: String, subtitle: String?) {
-        self.title = title
-        self.subtitle = subtitle
-    }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.title3.weight(.semibold))
-            if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
         }
     }
 }

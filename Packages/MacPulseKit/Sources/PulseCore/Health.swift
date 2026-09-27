@@ -49,3 +49,16 @@ public enum MemoryPressure: Sendable, Codable {
         }
     }
 }
+
+/// macOS's own verdict on battery wear (not charge level).
+public enum BatteryCondition: Sendable, Codable {
+    case normal
+    case serviceRecommended
+
+    public var health: HealthLevel {
+        switch self {
+        case .normal: .healthy
+        case .serviceRecommended: .warning
+        }
+    }
+}

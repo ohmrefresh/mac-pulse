@@ -45,6 +45,16 @@ import PulseCollectors
         #expect(g.observe(cpu(86), at: at(12)).isEmpty)          // reported once
     }
 
+    @Test func reportedHealthIsTheDebouncedLevel() {
+        var g = TimelineGenerator()
+        #expect(g.reportedHealth(.cpu) == nil)
+        _ = g.observe(cpu(10), at: at(0))
+        _ = g.observe(cpu(85), at: at(1))
+        #expect(g.reportedHealth(.cpu) == .healthy)             // not held yet
+        _ = g.observe(cpu(85), at: at(11))
+        #expect(g.reportedHealth(.cpu) == .warning)
+    }
+
     @Test func blipDoesNotLog() {
         var g = TimelineGenerator()
         _ = g.observe(cpu(10), at: at(0))

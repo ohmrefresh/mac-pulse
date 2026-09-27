@@ -28,6 +28,9 @@ struct TimelineSectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            PageHeader("Timeline", subtitle: "What changed on this Mac, and when.")
+                .padding([.horizontal, .top], 24)
+                .padding(.bottom, 8)
             HStack {
                 Picker("Range", selection: $range) {
                     ForEach(Range.allCases) { Text($0.label).tag($0) }
@@ -42,7 +45,8 @@ struct TimelineSectionView: View {
                 Spacer()
                 Text("\(events.count) events").foregroundStyle(.secondary)
             }
-            .padding(12)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 8)
             if let error = metrics.historyError {
                 Label("New events are not being saved: \(error)", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
@@ -61,7 +65,6 @@ struct TimelineSectionView: View {
                     .listStyle(.inset)
             }
         }
-        .navigationTitle("Timeline")
         .task(id: range) { await load() }
     }
 

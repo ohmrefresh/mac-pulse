@@ -70,4 +70,12 @@ import PulseCollectors
         #expect(MenuBarFormatter.latency(r) == "--")
         #expect(r.health == .critical)
     }
+
+    @Test func segmentsMatchTextAndEveryItemHasASymbol() {
+        let inputs = MenuBarInputs()
+        let items = MenuBarItem.allCases
+        #expect(MenuBarFormatter.segments(items, inputs).map(\.text).joined(separator: MenuBarFormatter.separator)
+                == MenuBarFormatter.text(items, inputs))
+        #expect(items.allSatisfy { !MenuBarFormatter.symbol(for: $0).isEmpty })
+    }
 }

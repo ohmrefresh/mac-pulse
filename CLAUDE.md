@@ -64,6 +64,8 @@ Alerts: templates are seeded **disabled**; notification permission is requested 
 
 History: `MetricKind` raw values are persisted — never rename a case, only add. `LiveMetrics(recorder:)` takes the recorder by injection; tests pass none so they never touch the real database (`~/Library/Application Support/MacPulse/history.sqlite`).
 
+UI look follows `docs/prd/mockup.png` in system Light/Dark. Shared kit in `App/Sources/Components.swift`: `MetricStyle` (one tint + SF Symbol per metric — use it, don't pick colors ad hoc), `Sparkline`, `MetricCard`, `FooterStats`, `PageHeader` (every dashboard section draws its own large title; the window title is hidden), `SubsectionHeader`, `cardBackground()`, `AppLogo`, `IconCache`. Never show a value we don't measure (e.g. CPU GHz, disk category split).
+
 App UI rule: popover and dashboard host SwiftUI inside AppKit (`NSPopover`, `NSWindow`) and drop their hosting controller on close, so hidden UI never re-renders. Any view that shows a process list must call `metrics.processListAppeared()/processListDisappeared()` (reference-counted) to get 1 s scans. Add other targets to `Package.swift` (and as `project.yml` dependencies) as they are built.
 
 ## Invariants
@@ -75,7 +77,7 @@ App UI rule: popover and dashboard host SwiftUI inside AppKit (`NSPopover`, `NSW
 - **Diagnostics:** deterministic rules only. Every Finding has Observed / Possible cause / Recommendation; `PossibleCause` only has `.likely`/`.possibly` cases, so an unhedged cause can't be expressed — keep it that way.
 - **Temperature:** v1.0 uses `ProcessInfo.thermalState` only. No °C (private IOHID) until Phase 4.
 - **Process list is hybrid:** an unprivileged app cannot read root/system processes (~⅓ of all, incl. WindowServer). `ProcessCollector` reads its own user's processes via `proc_pid_rusage`, and fills the rest from setuid `/bin/ps` every 5 s. Don't replace `ps` with a privileged helper without an ADR.
-- **Menu-bar CPU cost is mostly AppKit**, not collectors: each title change relayouts the menu bar. Keep the status item fixed-width and only set the title when the string changes.
+- **Menu-bar CPU cost is mostly AppKit**, not collectors: each title change relayouts the menu bar. Keep the status item fixed-width and only set the title when the string changes. Menu-bar icons are static template SF Symbol attachments (optional, "Show icons"); compare the stored plain-text key, not `button.title` (attachments add placeholder characters). No sparklines or colors in the menu bar.
 - **Event-driven refresh:** `SystemEventSources` (memory pressure, thermal, power source) and the app's disk mount/unmount observers call `expedite`, so those metrics update within a second instead of waiting for their cadence.
 - **Phase 3/4 cadences:** sensors cost ~20 ms (HID IPC per sensor; one service per name, `tdev` skipped) → every 60 s, 15 s while the menu bar shows °C, 5 s while a temperature view calls `sensorsAppeared()`. Docker list every 30 s; Docker stats and listening ports only while the Developer view is visible (`developerAppeared()`). Public IP is opt-in (off by default) and only contacts 1.1.1.1.
 - **SMC struct layout:** `SMCConnection.KeyData` must be exactly 80 bytes; `KeyInfo` has explicit padding because Swift otherwise packs following fields into its tail.

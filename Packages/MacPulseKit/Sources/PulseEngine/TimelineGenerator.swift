@@ -45,6 +45,11 @@ public struct TimelineGenerator: Sendable {
         self.config = config
     }
 
+    /// The debounced Health Level last reported for a category (what the timeline shows), nil before the first reading.
+    public func reportedHealth(_ category: TimelineCategory) -> HealthLevel? {
+        health[category]?.reported
+    }
+
     // MARK: Snapshot readings
 
     public mutating func observe(_ s: Snapshot, at now: Date) -> [TimelineEvent] {
