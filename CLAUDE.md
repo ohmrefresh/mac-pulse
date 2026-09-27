@@ -36,6 +36,8 @@ scripts/soak.sh                 # 1 h
 DURATION=300 scripts/soak.sh    # quick check
 ```
 
+Packaging (ADR 0001): `scripts/package.sh` builds Release, re-signs with hardened runtime (and verifies the flag), and writes `dist/MacPulse-<version>.dmg`. Without `DEVELOPER_ID` it is an ad-hoc local test build; with `DEVELOPER_ID` + `NOTARY_PROFILE` it signs, notarizes and staples. Version comes from `MARKETING_VERSION` in `project.yml`.
+
 Opt-in live network test: `PULSE_NET=1 swift test --filter InternetPingTests`.
 
 App sources: `App/Sources`. `LSUIElement` = true (menu-bar only, no Dock icon).

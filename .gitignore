@@ -8,3 +8,4 @@ graphify-out/
 .claude/settings.local.json
 .claude/.headroom*
 MacPulse.xcodeproj/
+dist/
