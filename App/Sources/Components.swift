@@ -366,14 +366,13 @@ struct DonutChart: View {
 /// (the dashboard's minimum width is 980).
 struct ChartWithRail<Content: View>: View {
     let rail: StatRail
-    var railWidth: CGFloat = 230
     @ViewBuilder let chart: Content
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 20) {
                 chart.frame(minWidth: 420)
-                rail.frame(width: railWidth)
+                rail.frame(width: 230)
             }
             VStack(alignment: .leading, spacing: 14) {
                 chart

@@ -196,18 +196,18 @@ struct PerformanceView: View {
     private var cpuRows: [StatRail.Row] {
         let topology = metrics.cpuTopology
         return [
-            .init(label: "Total Usage", value: metrics.cpu.map { Format.percent($0.totalPercent) }),
-            .init(label: "Current Frequency", value: metrics.frequency?.cpuCurrentHz.map(Format.frequency)),
+            .init(label: "Total usage", value: metrics.cpu.map { Format.percent($0.totalPercent) }),
+            .init(label: "Current frequency", value: metrics.frequency?.cpuCurrentHz.map(Format.frequency)),
             // Apple Silicon reports a ceiling through IOReport; Intel publishes one through sysctl.
-            .init(label: "Max Frequency",
+            .init(label: "Max frequency",
                   value: (metrics.frequency?.cpuMaxHz ?? topology.maxFrequencyHz).map(Format.frequency)),
         ]
         // One row per cluster, labelled the way the kernel names it (e.g. "Super", "Performance").
         + topology.clusters.map { .init(label: "Cores (\($0.name))", value: "\($0.logicalCount)") }
         + [
-            .init(label: "Logical Processors", value: topology.logicalCount.map(String.init)),
-            .init(label: "Load Average (1m)", value: metrics.loadAverage.map { Format.load($0.oneMinute) }),
-            .init(label: "Load Average (5m)", value: metrics.loadAverage.map { Format.load($0.fiveMinutes) }),
+            .init(label: "Logical processors", value: topology.logicalCount.map(String.init)),
+            .init(label: "Load average (1m)", value: metrics.loadAverage.map { Format.load($0.oneMinute) }),
+            .init(label: "Load average (5m)", value: metrics.loadAverage.map { Format.load($0.fiveMinutes) }),
             .init(label: "Uptime", value: metrics.uptime.map(Format.uptime)),
         ]
     }
@@ -217,7 +217,7 @@ struct PerformanceView: View {
     private var gpuSection: some View {
         Section2(title: "GPU", subtitle: metrics.gpu?.name ?? "No GPU data") {
             ChartWithRail(rail: StatRail(rows: gpuRows)) {
-                gpuChart.frame(height: 180)
+                gpuChart.frame(height: 200)
             }
         }
     }
@@ -240,9 +240,9 @@ struct PerformanceView: View {
     private var gpuRows: [StatRail.Row] {
         let gpu = metrics.gpu
         return [
-            .init(label: "Total Usage", value: gpu.map { Format.percent($0.utilizationPercent) }),
+            .init(label: "Total usage", value: gpu.map { Format.percent($0.utilizationPercent) }),
             .init(label: "Renderer", value: gpu?.rendererPercent.map(Format.percent)),
-            .init(label: "Memory In Use", value: gpu?.memoryInUseBytes.map(Format.memory)),
+            .init(label: "Memory in use", value: gpu?.memoryInUseBytes.map(Format.memory)),
             .init(label: "Power", value: metrics.frequency?.gpuPowerWatts.map(Format.watts)),
         ]
     }
@@ -288,8 +288,8 @@ struct PerformanceView: View {
 
     /// Bands add up to Memory Used plus Cached Files, as a share of installed RAM.
     private var memorySeries: [TimeSeriesChart.Series] {
-        [("App Memory", metrics.memoryAppHistory), ("Wired", metrics.memoryWiredHistory),
-         ("Compressed", metrics.memoryCompressedHistory), ("Cached Files", metrics.memoryCachedHistory)]
+        [("App memory", metrics.memoryAppHistory), ("Wired", metrics.memoryWiredHistory),
+         ("Compressed", metrics.memoryCompressedHistory), ("Cached files", metrics.memoryCachedHistory)]
             .enumerated()
             .map { index, pair in
                 TimeSeriesChart.Series(name: pair.0, values: pair.1.values,
@@ -317,23 +317,19 @@ struct PerformanceView: View {
                 }
                 Divider()
                 HStack {
-                    Text("Swap Used").foregroundStyle(.secondary)
+                    Text("Swap used").foregroundStyle(.secondary)
                     Spacer()
                     Text(Format.memory(m.swapUsedBytes)).monospacedDigit()
                 }
                 .font(.callout)
-                Button(action: showMemoryTimeline) {
-                    HStack {
-                        Text("Memory Pressure").foregroundStyle(.secondary)
-                        Spacer()
-                        HealthBadge(level: m.pressure?.health ?? .unknown)
-                        Image(systemName: "chevron.right").foregroundStyle(.tertiary).font(.caption)
-                    }
-                    .font(.callout)
-                    .contentShape(Rectangle())
+                HStack {
+                    Text("Memory pressure").foregroundStyle(.secondary)
+                    Spacer()
+                    HealthBadge(level: m.pressure?.health ?? .unknown)
+                    // Same affordance the Sensors thermal card and Overview's Recent Activity use.
+                    Button("View History", action: showMemoryTimeline).controlSize(.small)
                 }
-                .buttonStyle(.plain)
-                .help("Show memory events in the Timeline")
+                .font(.callout)
             }
         } else {
             Text("No memory data yet").foregroundStyle(.secondary)
@@ -342,10 +338,10 @@ struct PerformanceView: View {
 
     /// Slices sum to installed RAM: Used (app + wired + compressed) plus Cached Files plus Free.
     private func memorySlices(_ m: MemoryReading) -> [DonutChart.Slice] {
-        [.init(label: "App Memory", value: Double(m.appBytes), tint: MetricStyle.memory.shade(0, of: 5)),
+        [.init(label: "App memory", value: Double(m.appBytes), tint: MetricStyle.memory.shade(0, of: 5)),
          .init(label: "Wired", value: Double(m.wiredBytes), tint: MetricStyle.memory.shade(1, of: 5)),
          .init(label: "Compressed", value: Double(m.compressedBytes), tint: MetricStyle.memory.shade(2, of: 5)),
-         .init(label: "Cached Files", value: Double(m.cachedFilesBytes), tint: MetricStyle.memory.shade(3, of: 5)),
+         .init(label: "Cached files", value: Double(m.cachedFilesBytes), tint: MetricStyle.memory.shade(3, of: 5)),
          .init(label: "Free", value: Double(m.freeBytes), tint: .secondary)]
     }
 }
