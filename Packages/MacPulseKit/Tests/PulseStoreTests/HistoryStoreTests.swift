@@ -155,3 +155,44 @@ import PulseCore
         #expect(await recorder.lastError == nil)
     }
 }
+
+@Suite struct HistoryRecorderErrorTests {
+    struct DiskFull: LocalizedError { var errorDescription: String? { "The disk is full." } }
+
+    /// Fails while `failing` is set.
+    final class FlakyWriter: HistoryWriting, @unchecked Sendable {
+        let lock = NSLock()
+        var failing = true
+        func write(samples: [MetricSample], processes: [ProcessSample], events: [TimelineEvent],
+                   now: Date, retention: RetentionPreset) throws {
+            if lock.withLock({ failing }) { throw DiskFull() }
+        }
+    }
+
+    @Test func reportsWriteFailureAndRecovery() async throws {
+        let writer = FlakyWriter()
+        let recorder = HistoryRecorder(store: try HistoryStore(url: nil), writer: writer)
+        let seen = ErrorLog()
+        await recorder.setErrorHandler { seen.append($0) }
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+
+        await recorder.flush(now: t)
+        #expect(await recorder.lastError == "The disk is full.")
+        #expect(seen.values == ["The disk is full."])
+
+        await recorder.flush(now: t.addingTimeInterval(30))        // still failing: no duplicate callback
+        #expect(seen.values.count == 1)
+
+        writer.lock.withLock { writer.failing = false }
+        await recorder.flush(now: t.addingTimeInterval(60))
+        #expect(await recorder.lastError == nil)
+        #expect(seen.values == ["The disk is full.", nil])
+    }
+}
+
+final class ErrorLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String?] = []
+    func append(_ value: String?) { lock.withLock { storage.append(value) } }
+    var values: [String?] { lock.withLock { storage } }
+}

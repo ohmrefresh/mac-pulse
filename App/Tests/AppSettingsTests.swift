@@ -50,6 +50,17 @@ import PulseEngine
         #expect(s.alertRules.map(\.name) == AlertRule.templates.map(\.name))
     }
 
+    @Test func deletedTemplateStaysDeletedAcrossLaunches() {
+        let d = freshDefaults()
+        let a = AppSettings(metrics: LiveMetrics(), defaults: d)
+        let packetLoss = a.alertRules.first { $0.name == "Packet Loss" }!
+        a.deleteRule(packetLoss.id)
+        a.addRule(for: .batteryPercent)
+        let b = AppSettings(metrics: LiveMetrics(), defaults: d)
+        #expect(!b.alertRules.contains { $0.name == "Packet Loss" })
+        #expect(b.alertRules.last?.metric == .batteryPercent && b.alertRules.last?.isEnabled == false)
+    }
+
     @Test func menuBarTogglesKeepCanonicalOrder() {
         let s = AppSettings(metrics: LiveMetrics(), defaults: freshDefaults())
         s.menuBarItems = []

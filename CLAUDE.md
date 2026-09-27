@@ -42,6 +42,8 @@ Opt-in live network test: `PULSE_NET=1 swift test --filter InternetPingTests`.
 
 App sources: `App/Sources`; app-layer tests (`MacPulseTests`, hosted in the app) in `App/Tests`: `xcodebuild -project MacPulse.xcodeproj -scheme MacPulse -destination "platform=macOS" test`. The app skips all monitoring when `XCTestConfigurationFilePath` is set, so tests never touch the real history database.
 
+If Xcode reports that a package symbol doesn't exist when `swift test` sees it, its cached package build is stale: delete `.build/xcode-dev` (or the relevant derived-data folder) and rebuild.
+
 CI: `.github/workflows/ci.yml` (package tests, app build + tests, informational benchmarks). `LSUIElement` = true (menu-bar only, no Dock icon).
 
 ## Architecture

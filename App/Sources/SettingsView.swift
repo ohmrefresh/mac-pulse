@@ -83,6 +83,10 @@ struct SettingsView: View {
     private var data: some View {
         Form {
             if settings.historyAvailable {
+                if let error = settings.historyError {
+                    Label("Saving history is failing: \(error)", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                }
                 Picker("Keep history for", selection: $settings.retention) {
                     ForEach(RetentionPreset.allCases, id: \.self) { Text(label($0)).tag($0) }
                 }

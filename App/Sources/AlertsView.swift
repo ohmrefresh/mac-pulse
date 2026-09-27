@@ -18,9 +18,21 @@ struct AlertsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Section("Rules") {
+            Section {
                 ForEach($settings.alertRules) { $rule in
-                    RuleRow(rule: $rule, isFiring: metrics.firingAlertIDs.contains(rule.id))
+                    RuleRow(rule: $rule, isFiring: metrics.firingAlertIDs.contains(rule.id),
+                            onDelete: { settings.deleteRule(rule.id) })
+                }
+            } header: {
+                HStack {
+                    Text("Rules")
+                    Spacer()
+                    Menu("Add Rule") {
+                        ForEach(AlertMetric.allCases, id: \.self) { metric in
+                            Button(metric.displayName) { settings.addRule(for: metric) }
+                        }
+                    }
+                    .fixedSize()
                 }
             }
             Section("Recent alerts (7 days)") {
@@ -56,12 +68,14 @@ struct AlertsView: View {
 private struct RuleRow: View {
     @Binding var rule: AlertRule
     let isFiring: Bool
+    let onDelete: () -> Void
+    @State private var confirmDelete = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Toggle(isOn: $rule.isEnabled) { Text(rule.name).font(.headline) }
-                    .toggleStyle(.switch)
+                Toggle("", isOn: $rule.isEnabled).toggleStyle(.switch).labelsHidden()
+                TextField("Name", text: $rule.name).font(.headline).textFieldStyle(.plain)
                 if isFiring { HealthBadge(level: rule.severity.health, label: "Firing") }
                 Spacer()
                 Picker("", selection: $rule.severity) {
@@ -70,6 +84,12 @@ private struct RuleRow: View {
                 }
                 .labelsHidden()
                 .fixedSize()
+                Button(role: .destructive) { confirmDelete = true } label: { Image(systemName: "trash") }
+                    .buttonStyle(.borderless)
+                    .help("Delete rule")
+                    .confirmationDialog("Delete “\(rule.name)”?", isPresented: $confirmDelete) {
+                        Button("Delete", role: .destructive, action: onDelete)
+                    }
             }
             HStack(spacing: 12) {
                 Text(rule.metric.displayName).foregroundStyle(.secondary)

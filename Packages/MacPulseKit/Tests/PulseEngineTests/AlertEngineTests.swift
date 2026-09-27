@@ -108,14 +108,29 @@ import PulseCore
         #expect(AlertRule.templates.allSatisfy { !$0.isEnabled })
     }
 
-    @Test func mergingAddsOnlyMissingTemplatesKeepingEdits() {
+    @Test func mergingAddsOnlyNewTemplatesKeepingEdits() {
         var saved = Array(AlertRule.templates.prefix(6))
         saved[0].threshold = 70
         saved[0].isEnabled = true
-        let merged = AlertRule.mergingNewTemplates(into: saved)
+        let offered = Set(saved.map(\.name))
+        let merged = AlertRule.mergingNewTemplates(into: saved, alreadyOffered: offered)
         #expect(merged.count == 8)
         #expect(merged[0].threshold == 70 && merged[0].isEnabled)
         #expect(merged.suffix(2).map(\.name) == ["Hot CPU", "High GPU"])
-        #expect(AlertRule.mergingNewTemplates(into: merged) == merged)
+        #expect(AlertRule.mergingNewTemplates(into: merged, alreadyOffered: offered) == merged)
+    }
+
+    @Test func deletedTemplateStaysDeleted() {
+        let withoutPacketLoss = AlertRule.templates.filter { $0.name != "Packet Loss" }
+        let allNames = Set(AlertRule.templates.map(\.name))
+        #expect(AlertRule.mergingNewTemplates(into: withoutPacketLoss, alreadyOffered: allNames) == withoutPacketLoss)
+    }
+
+    @Test func newRuleDefaultsAreDisabledAndSensible() {
+        for metric in AlertMetric.allCases {
+            let r = AlertRule.newRule(for: metric)
+            #expect(!r.isEnabled && r.metric == metric && r.name.hasSuffix(" rule"))
+        }
+        #expect(AlertRule.newRule(for: .batteryPercent).comparator == .below)
     }
 }

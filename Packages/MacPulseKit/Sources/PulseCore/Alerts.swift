@@ -80,9 +80,27 @@ public struct AlertRule: Codable, Sendable, Equatable, Identifiable {
                   duration: 60, severity: .warning, isEnabled: false),
     ]
 
-    /// Adds templates missing from a saved rule list (e.g. ones introduced after the user saved), by name.
-    public static func mergingNewTemplates(into saved: [AlertRule]) -> [AlertRule] {
-        let names = Set(saved.map(\.name))
-        return saved + templates.filter { !names.contains($0.name) }
+    /// Adds templates introduced since the user last saved. Templates already offered are never re-added,
+    /// so a template the user deleted stays deleted.
+    public static func mergingNewTemplates(into saved: [AlertRule], alreadyOffered: Set<String>) -> [AlertRule] {
+        let present = Set(saved.map(\.name))
+        return saved + templates.filter { !present.contains($0.name) && !alreadyOffered.contains($0.name) }
+    }
+
+    /// A new user rule for `metric`, disabled, with a sensible starting threshold.
+    public static func newRule(for metric: AlertMetric) -> AlertRule {
+        let (comparator, threshold): (AlertComparator, Double) = switch metric {
+        case .cpuPercent: (.above, 90)
+        case .memoryPressure: (.atLeast, Double(HealthLevel.warning.rawValue))
+        case .diskFreeGB: (.below, 20)
+        case .latencyMs: (.above, 200)
+        case .packetLossPercent: (.above, 5)
+        case .batteryPercent: (.below, 20)
+        case .thermalState: (.atLeast, Double(ThermalState.serious.rawValue))
+        case .cpuTemperatureC: (.above, 90)
+        case .gpuPercent: (.above, 90)
+        }
+        return AlertRule(name: "\(metric.displayName) rule", metric: metric, comparator: comparator, threshold: threshold,
+                         duration: 30, severity: .warning, isEnabled: false)
     }
 }

@@ -53,6 +53,7 @@ final class AppSettings {
     }
 
     var historyAvailable: Bool { metrics.recorder != nil }
+    var historyError: String? { metrics.historyError }
 
     /// Decision D1: off by default.
     var publicIPEnabled: Bool {
@@ -68,6 +69,14 @@ final class AppSettings {
             }
             if newlyEnabled { onAlertEnabled?() }
         }
+    }
+
+    func addRule(for metric: AlertMetric) {
+        alertRules.append(AlertRule.newRule(for: metric))
+    }
+
+    func deleteRule(_ id: UUID) {
+        alertRules.removeAll { $0.id == id }
     }
 
     /// Called when a rule is switched on, so the app can ask for notification permission then.
@@ -101,9 +110,14 @@ final class AppSettings {
         lossCriticalPercent = defaults.object(forKey: Key.lossCriticalPercent.rawValue) as? Double ?? n.packetLossPercent.critical
         retention = (defaults.object(forKey: Key.retention.rawValue) as? Int).flatMap(RetentionPreset.init(rawValue:)) ?? .thirtyDays
         publicIPEnabled = defaults.bool(forKey: Key.publicIPEnabled.rawValue)
-        alertRules = defaults.data(forKey: Key.alertRules.rawValue)
+        let savedRules = defaults.data(forKey: Key.alertRules.rawValue)
             .flatMap { try? JSONDecoder().decode([AlertRule].self, from: $0) }
-            .map(AlertRule.mergingNewTemplates(into:)) ?? AlertRule.templates
+        // Templates already offered are never re-added, so deleted ones stay deleted. Users from before
+        // this was tracked count their saved rule names as offered.
+        let offered = (defaults.stringArray(forKey: Key.offeredTemplates.rawValue)).map(Set.init)
+            ?? Set(savedRules?.map(\.name) ?? [])
+        alertRules = savedRules.map { AlertRule.mergingNewTemplates(into: $0, alreadyOffered: offered) } ?? AlertRule.templates
+        defaults.set(AlertRule.templates.map(\.name), forKey: Key.offeredTemplates.rawValue)
         let d = DiagnosticsConfig()
         func double(_ key: Key, _ fallback: Double) -> Double { defaults.object(forKey: key.rawValue) as? Double ?? fallback }
         cpuWarningPercent = double(.cpuWarningPercent, d.cpu.warning)
@@ -191,6 +205,7 @@ final class AppSettings {
         case menuBarItems, samplingInterval, showDockIcon, pingTarget
         case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules, publicIPEnabled
         case cpuWarningPercent, cpuCriticalPercent, gatewayLatencyMs, dnsSlowMs, lowDiskGB, hotCPUCelsius
+        case offeredTemplates
         case didOfferLaunchAtLogin
     }
 

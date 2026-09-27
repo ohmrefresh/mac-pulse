@@ -60,6 +60,8 @@ public final class LiveMetrics {
     /// Nil when history is disabled (tests) or the database could not be opened.
     @ObservationIgnored public let recorder: HistoryRecorder?
     public var history: HistoryStore? { recorder?.store }
+    /// Set while saving history keeps failing (disk full, permissions, corruption); nil when healthy.
+    public private(set) var historyError: String?
 
     public init(baseInterval: TimeInterval = 1, recorder: HistoryRecorder? = nil) {
         processorName = CPUCollector.processorName()
@@ -74,6 +76,11 @@ public final class LiveMetrics {
         let prober = self.prober
         let recorder = self.recorder
         post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Monitoring started"))
+        Task { [weak self] in
+            await recorder?.setErrorHandler { message in
+                Task { @MainActor in self?.historyError = message }
+            }
+        }
         systemEvents = SystemEventSources { [weak self] jobs in self?.expedite(jobs) }
         Task { [weak self] in
             await sampler.start { snapshot in self?.apply(snapshot) }

@@ -40,6 +40,38 @@ An active network test (ICMP ping or DNS lookup) against a target, as opposed to
 **Top Processes**:
 The top 10 processes by CPU and top 10 by memory at a process scan. The only processes kept in history.
 
+**Primary Interface**:
+The network interface carrying the default route (e.g. en0). Throughput is measured on it alone.
+
+**Thermal State** and **CPU Temperature** are different signals: the first is macOS's own four-step scale and drives Health Level; the second is a °C reading from private sensors and is informational only.
+
+## Developer
+
+**Local Service**:
+A process listening on a TCP port on this Mac, with its reachability: "this Mac only" (loopback) or all interfaces.
+_Avoid_: server, daemon (for this concept)
+
+**Runtime**:
+A development language or service recognised from a process name (Node.js, Python, PostgreSQL, Docker, …).
+
+**Container**:
+A Docker container reported by the local Docker daemon (Docker Desktop, OrbStack or Colima).
+
+**VPN**:
+Active when a tunnel interface is the primary route or carries a routable IPv4 address (split tunnel).
+
+**Public IP**:
+The address the internet sees, looked up only when the user opts in.
+
+## Hardware
+
+**Sensor**:
+A named temperature source read through private interfaces; may be unavailable after a macOS update.
+_Avoid_: probe (a Probe is a network test)
+
+**Fan Speed**:
+Revolutions per minute reported by the SMC; 0 means the fan is stopped, which is normal when cool.
+
 ## Alerts and history
 
 **Alert Rule**:
@@ -52,6 +84,9 @@ Inactive → Pending → Firing → Resolved. Firing needs the condition held fo
 **Timeline Event**:
 A recorded moment something changed: a Health Level transition, alert firing/resolving, connectivity change, notable process change, or system event (sleep/wake, power source, thermal).
 _Avoid_: log entry, activity
+
+**Template**:
+A predefined Alert Rule offered once; editing or deleting it is permanent, and only templates the user has never seen are added later.
 
 **Finding**:
 One diagnostic result made of an Observed fact, a Possible cause (always hedged), and a Recommendation.

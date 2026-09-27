@@ -43,6 +43,12 @@ struct TimelineSectionView: View {
                 Text("\(events.count) events").foregroundStyle(.secondary)
             }
             .padding(12)
+            if let error = metrics.historyError {
+                Label("New events are not being saved: \(error)", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Divider()
             if let loadError {
                 ContentUnavailableView("Could not read history", systemImage: "exclamationmark.triangle",
