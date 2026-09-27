@@ -11,12 +11,17 @@ struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                PageHeader(title: "Overview", subtitle: "A real-time view of your Mac's health and performance.") {
-                    Button(action: runDiagnostics) { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .help("Run Diagnostics (⌘R)")
+            // Rhythm, not a uniform stack: the concern line belongs to the header it qualifies, so
+            // it sits tight under it, and the grid starts after a wider gap.
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    PageHeader(title: "Overview", subtitle: "A real-time view of your Mac's health and performance.") {
+                        Button(action: runDiagnostics) { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .help("Run Diagnostics (⌘R)")
+                    }
+                    if let concern { concernLine(concern) }
                 }
                 Grid(horizontalSpacing: 16, verticalSpacing: 16) {
                     GridRow {
@@ -41,6 +46,63 @@ struct OverviewView: View {
             }
             .padding(24)
         }
+    }
+
+    /// The worst state on this page, and when it started.
+    ///
+    /// Six cards of equal weight answer "what is happening" and leave the user to compare them.
+    /// This is the page's lead: it appears only when something is not healthy, because a banner
+    /// that is always there is one the eye learns to skip.
+    private struct Concern {
+        let level: HealthLevel
+        let name: String
+        let category: TimelineCategory
+    }
+
+    /// Reading order of the grid, so a tie resolves to whatever the eye reaches first.
+    private var concern: Concern? {
+        let candidates: [(HealthLevel?, String, TimelineCategory)] = [
+            (metrics.cpuHealth, "CPU", .cpu),
+            (metrics.memory?.pressure?.health, "Memory pressure", .memory),
+            (metrics.networkHealth?.health, "Internet", .connectivity),
+            (metrics.battery?.condition?.health, "Battery condition", .battery),
+            (metrics.thermal?.health, "Thermal state", .thermal),
+        ]
+        return candidates
+            .compactMap { level, name, category in
+                level.map { Concern(level: $0, name: name, category: category) }
+            }
+            .filter { $0.level == .warning || $0.level == .critical }
+            .max { $0.level.rawValue < $1.level.rawValue }
+    }
+
+    /// When this state began, from the timeline the app already keeps. Absent if the event has
+    /// aged out of the live buffer — the state is still true, only its start time is unknown.
+    private func started(_ concern: Concern) -> Date? {
+        metrics.recentEvents
+            .filter { $0.category == concern.category && $0.severity == concern.level }
+            .max { $0.time < $1.time }?
+            .time
+    }
+
+    private func concernLine(_ concern: Concern) -> some View {
+        HStack(spacing: 8) {
+            SeverityMark(level: concern.level, font: .body)
+            Text(sentence(concern)).font(.body)
+            Spacer(minLength: 12)
+            Button("View Timeline", action: showTimeline)
+                .controlSize(.small)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "Memory pressure has been Critical since 23:15 · 4 minutes ago" — the clock for checking it
+    /// against another tool, the relative span because that is the question being asked.
+    private func sentence(_ concern: Concern) -> String {
+        let level = Format.health(concern.level)
+        guard let since = started(concern) else { return "\(concern.name) is \(level)" }
+        return "\(concern.name) has been \(level) since \(since.formatted(date: .omitted, time: .shortened)) · "
+            + since.formatted(.relative(presentation: .numeric))
     }
 
     private var cpuCard: some View {

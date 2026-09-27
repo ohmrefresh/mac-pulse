@@ -183,7 +183,7 @@ Grouping is the job of the card, not of depth. Where two things must be told apa
 - **Nesting:** forbidden. A card never contains another card; inner grouping uses plain stacks.
 
 ### Metric cards
-The summary row. Tinted SF Symbol and title, optional Health badge trailing, then the headline figure with its trend delta beside a sparkline, and a caption below at full card width. They wrap rather than compress: `LazyVGrid(.adaptive(minimum: 240))`. At the 980pt window minimum a three-up row leaves a long title a few points short, so the title shrinks one notch (`minimumScaleFactor(0.85)`) instead of ellipsising — the word survives either way.
+The summary row. Tinted SF Symbol and title, optional Health badge trailing, then the headline figure with its trend delta beside a sparkline, and a caption below at full card width. Overview lays them out in a fixed three-column `Grid`, so a metric keeps its position between visits and the eye learns where to look; cards that need the room span columns (`gridCellColumns`). At the 980pt window minimum a three-up row leaves a long title a few points short, so the title shrinks one notch (`minimumScaleFactor(0.85)`) instead of ellipsising — the word survives either way.
 
 ### Statistics rail
 The rail beside a chart (230pt, 7pt row rhythm, label left in Ink Secondary, value right in monospaced digits). **A row whose value is nil is omitted entirely** — this is the visual expression of the product's first principle. Rail height therefore varies by machine, and that is correct.
@@ -199,6 +199,13 @@ The rail beside a chart (230pt, 7pt row rhythm, label left in Ink Secondary, val
 Capsule, 8×2px padding, caption weight medium, fill in the Health tint at 15%. The only component that changes colour with state.
 
 Its ink is **not** that same tint. Ink and fill drawn from one system colour measure under 2:1 in Light — the label disappears into its own capsule. The ink is the tint re-lit along OKLCH lightness until it clears 4.5:1 against the composited fill (`Color.readableInk(on:minimum:)`), which leaves Dark untouched because the system tint already clears the floor there. Status *marks* — the timeline dot, the severity glyphs, the thermal bands — take the same treatment at the 3:1 non-text floor via `HealthLevel.markTint`. Both floors are asserted by `StatusVocabularyTests`, through the real appearances, so a system-colour change fails the build.
+
+### Page lead
+Six cards of equal weight tell the user what is happening and leave them to compare. Above the grid, and only when something is not healthy, Overview states the worst reading and when it began: `SeverityMark` + "Memory pressure has been Critical since 23:15 · 4 minutes ago", with a small bordered button into the Timeline.
+
+It carries the page's hierarchy on position and space rather than size or colour — it is the first thing under the title, tight to the header it qualifies (10pt), with a wider gap (24pt) before the grid. When every reading is healthy the line is **absent**, not replaced by reassurance: a banner that is always present is one the eye learns to skip, and this app's colour appears when health changes.
+
+The start time comes from the timeline the app already keeps. If the event has aged out of the live buffer the sentence drops the clause rather than guessing — the state is still true, only its beginning is unknown.
 
 ### Range picker
 One component, `ChartRangePicker`, in the trailing slot of `PageHeader` on every page that has a range — Performance, Network, Sensors, Timeline. Surfaces pick a **named option set** rather than writing an array: `ChartRange.allCases` where Live is meaningful, `ChartRange.stored` for surfaces that only read recorded history, `ChartRange.sensors` where 30 d is not retained. Timeline used to own a private `Range` enum that duplicated `ChartRange` value for value; it is gone. A filter that is not a range (Timeline's Category) sits on its own row below, never beside the range.
