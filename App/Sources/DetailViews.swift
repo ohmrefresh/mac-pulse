@@ -104,7 +104,7 @@ struct PerformanceView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .bottom, spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
-                        BigValue(value)
+                        BigValue(value, awaiting: "Reading \(title.lowercased())…")
                         DeltaLabel(value: trend, format: trendFormat)
                     }
                     Spacer(minLength: 4)
@@ -332,7 +332,7 @@ struct PerformanceView: View {
                 .font(.callout)
             }
         } else {
-            Text("No memory data yet").foregroundStyle(.secondary)
+            InlineEmpty("Memory history appears once a few samples are recorded.")
         }
     }
 
@@ -377,10 +377,13 @@ struct NetworkDetailView: View {
                                             interval: 5, format: { "\(Int($0)) ms" })
                         } else {
                             HistoryChart(history: metrics.history,
-                                         lines: [.init(kind: .latencyMs, name: "Internet", tint: MetricStyle.internet.tint),
-                                                 .init(kind: .secondaryLatencyMs, name: "Second target", tint: .cyan),
-                                                 .init(kind: .gatewayLatencyMs, name: "Gateway", tint: .orange),
-                                                 .init(kind: .dnsLatencyMs, name: "DNS", tint: .purple)],
+                                         // Four probes of one metric family: step the family's own
+                                         // tint. A second hue here reads as a second metric, and
+                                         // orange and purple already mean Temperature and Memory.
+                                         lines: [.init(kind: .latencyMs, name: "Internet", tint: MetricStyle.internet.shade(0, of: 4)),
+                                                 .init(kind: .secondaryLatencyMs, name: "Second target", tint: MetricStyle.internet.shade(1, of: 4)),
+                                                 .init(kind: .gatewayLatencyMs, name: "Gateway", tint: MetricStyle.internet.shade(2, of: 4)),
+                                                 .init(kind: .dnsLatencyMs, name: "DNS", tint: MetricStyle.internet.shade(3, of: 4))],
                                          range: range, format: { "\(Int($0)) ms" })
                         }
                     }
@@ -411,7 +414,7 @@ struct NetworkDetailView: View {
         if let probe {
             KeyValue(title, probe.address)
             KeyValue("  Latency", probe.latencyMs.map { "\(Int($0.rounded())) ms" } ?? "timeout")
-            KeyValue("  Packet loss (1 min)", probe.lossPercent.map(Format.percent) ?? "--")
+            KeyValue("  Packet loss (1 min)", probe.lossPercent.map(Format.percent))
         }
     }
 }
@@ -463,9 +466,9 @@ struct BatteryView: View {
                                   points: 120, domain: 0...100, height: 70)
                         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
                             KeyValue("State", Format.batteryState(b))
-                            KeyValue("Condition", b.condition.map(Format.batteryCondition) ?? "--")
-                            KeyValue("Cycle count", b.cycleCount.map(String.init) ?? "--")
-                            KeyValue("Maximum capacity", b.maximumCapacityPercent.map(Format.percent) ?? "--")
+                            KeyValue("Condition", b.condition.map(Format.batteryCondition))
+                            KeyValue("Cycle count", b.cycleCount.map(String.init))
+                            KeyValue("Maximum capacity", b.maximumCapacityPercent.map(Format.percent))
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -484,7 +487,7 @@ struct BatteryView: View {
     @ViewBuilder private var peripherals: some View {
         Text("Accessories").font(.headline)
         if metrics.peripheralBatteries.isEmpty {
-            Text("No Bluetooth accessories reporting a battery level.").foregroundStyle(.secondary)
+            InlineEmpty("No Bluetooth accessories reporting a battery level.")
         } else {
             Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
                 ForEach(metrics.peripheralBatteries) { KeyValue($0.name, "\($0.percent)%") }
@@ -529,18 +532,22 @@ extension Section2 where Trailing == EmptyView {
     }
 }
 
+/// A grid row that omits itself when the value is nil: the Nil Row Rule, applied to key/value pairs.
 private struct KeyValue: View {
     let key: String
-    let value: String
-    init(_ key: String, _ value: String) {
+    let value: String?
+    init(_ key: String, _ value: String?) {
         self.key = key
         self.value = value
     }
 
+    @ViewBuilder
     var body: some View {
-        GridRow {
-            Text(key).foregroundStyle(.secondary)
-            Text(value).monospacedDigit()
+        if let value {
+            GridRow {
+                Text(key).foregroundStyle(.secondary)
+                Text(value).monospacedDigit()
+            }
         }
     }
 }

@@ -49,9 +49,9 @@ Voice: short, factual, sentence case. Name things the way macOS names them ("Mem
 
 ## Accessibility & Inclusion
 
-- **WCAG AA, VoiceOver-complete.** Body text ≥ 4.5:1; non-text and chart graphics ≥ 3:1. The shade-ramp contrast floors are asserted by tests, so a palette change that drops below them fails the build rather than shipping.
+- **WCAG AA, VoiceOver-complete.** Body text ≥ 4.5:1; non-text and chart graphics ≥ 3:1. The shade-ramp floors and the Health Level vocabulary (badge ink at 4.5:1, dots and glyphs at 3:1, both appearances) are asserted by tests, so a palette change that drops below them fails the build rather than shipping.
 - **Charts are summarised, not enumerated.** Each chart is one labelled element announcing its latest value per series; decorative sparklines are hidden from the accessibility tree entirely.
 - **Every control labelled and keyboard-reachable**, using standard AppKit/SwiftUI affordances so hover, focus and keyboard behaviour come from the system rather than being reimplemented.
 - **Both appearances are first-class.** Light and Dark are verified on screen, and colour ramps walk away from whichever background they sit on.
-- **Information is never carried by colour alone** — every chart band and ring slice has its value printed beside it.
-- **Motion:** the app currently ships none, so there is nothing to reduce. Any motion added later must honour Reduce Motion and must convey state, not decorate.
+- **Information is never carried by colour alone** — every chart band and ring slice has its value printed beside it, and every Health Level state carries a glyph (check, triangle, octagon) as well as a tint, so a severity row reads in greyscale.
+- **Motion:** the app ships one animation, the sensor table's disclosure, and it honours Reduce Motion. Any motion added later does the same, and must convey state, not decorate.

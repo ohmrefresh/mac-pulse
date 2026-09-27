@@ -12,7 +12,6 @@ struct SensorsView: View {
     let showThermalHistory: () -> Void
     @State private var range: ChartRange = .hour
 
-    private static let ranges: [ChartRange] = [.hour, .sixHours, .day, .week]
 
     var body: some View {
         ScrollView {
@@ -48,50 +47,49 @@ struct SensorsView: View {
 
     // MARK: Header
 
+    /// The same header every other page draws: title, subtitle, and the range picker in the
+    /// trailing slot. The page-title glyph and the bordered banner this page used to own existed
+    /// nowhere else in the app; thermal state now speaks through the standard Health badge.
     private var header: some View {
-        HStack(alignment: .center, spacing: 14) {
-            Image(systemName: "thermometer.medium")
-                .font(.system(size: 34, weight: .medium))
-                .foregroundStyle(MetricStyle.temperature.tint)
-            PageHeader("Sensors", subtitle: "Real-time temperature and hardware sensors from your Mac.")
-            Spacer()
+        PageHeader(title: "Sensors",
+                   subtitle: "Real-time temperature and hardware sensors from your Mac.") {
             VStack(alignment: .trailing, spacing: 10) {
-                thermalBanner
-                ChartRangePicker(range: $range, options: Self.ranges)
+                thermalBadge
+                ChartRangePicker(range: $range, options: ChartRange.sensors)
             }
         }
     }
 
-    private var thermalBanner: some View {
+    /// Thermal state as the app's one status component, with the machine's own word for the state.
+    private var thermalBadge: some View {
         let state = metrics.thermal
         let level = state?.health ?? .unknown
-        return HStack(spacing: 10) {
-            Image(systemName: level == .healthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.title2)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(Format.health(level)).font(.headline)
-                Text(state.map { "Thermal state \(Format.thermal($0))" } ?? "Thermal state unknown")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .foregroundStyle(level.tint)
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(level.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(level.tint.opacity(0.4)))
+        return HealthBadge(level: level,
+                           label: state.map { "Thermal state \(Format.thermal($0))" } ?? "Thermal state unknown")
     }
 
     // MARK: Cards
 
+    /// A tile per sensor this Mac actually reports. A machine without an SSD or battery probe gets
+    /// three tiles or two, never a tile with a dash in it.
     private func cards(_ s: SensorsReading) -> some View {
         HStack(spacing: 16) {
-            TemperatureCard(title: "CPU", caption: "hottest core", style: .cpu,
-                            value: s.cpuCelsius, series: metrics.temperatureHistory)
-            TemperatureCard(title: "Hottest", caption: s.hottest?.name, style: .temperature,
-                            value: s.hottest?.celsius, series: metrics.hottestTemperatureHistory)
-            TemperatureCard(title: "SSD", caption: nil, style: .ssdTemperature,
-                            value: s.ssdCelsius, series: metrics.ssdTemperatureHistory)
-            TemperatureCard(title: "Battery", caption: nil, style: .batteryTemperature,
-                            value: s.batteryCelsius, series: metrics.batteryTemperatureHistory)
+            if let cpu = s.cpuCelsius {
+                TemperatureCard(title: "CPU", caption: "hottest core", style: .cpu,
+                                value: cpu, series: metrics.temperatureHistory)
+            }
+            if let hottest = s.hottest {
+                TemperatureCard(title: "Hottest", caption: hottest.name, style: .temperature,
+                                value: hottest.celsius, series: metrics.hottestTemperatureHistory)
+            }
+            if let ssd = s.ssdCelsius {
+                TemperatureCard(title: "SSD", caption: nil, style: .ssdTemperature,
+                                value: ssd, series: metrics.ssdTemperatureHistory)
+            }
+            if let battery = s.batteryCelsius {
+                TemperatureCard(title: "Battery", caption: nil, style: .batteryTemperature,
+                                value: battery, series: metrics.batteryTemperatureHistory)
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -137,19 +135,20 @@ private struct TemperatureCard: View {
     let title: String
     let caption: String?
     let style: MetricStyle
-    let value: Double?
+    let value: Double
     let series: TimedSeries
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            // Plain tinted glyph, as on every other tile: the filled chip was a shape this page
+            // invented and no other surface used.
             Image(systemName: style.symbol)
                 .font(.title3)
                 .foregroundStyle(style.tint)
-                .frame(width: 36, height: 36)
-                .background(style.tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(width: 24)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).foregroundStyle(.secondary)
-                Text(value.map(Format.celsius) ?? "--").font(.title.weight(.semibold)).monospacedDigit()
+                Text(Format.celsius(value)).font(.title.weight(.semibold)).monospacedDigit()
                 change
                 if let caption { Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
@@ -161,18 +160,28 @@ private struct TemperatureCard: View {
         .cardBackground(padding: 14)
     }
 
-    /// "↓ 2°C" over 15 min; "—" until the series spans 15 minutes.
+    /// "↓ 2°C" over 15 min. Until the series spans 15 minutes there is no change to report, so the
+    /// row is absent rather than showing a minus sign next to a dash.
+    @ViewBuilder
     private var change: some View {
-        let delta = series.change(over: 900).map { Int($0.rounded()) }
-        let symbol = delta.map { $0 > 0 ? "arrow.up" : ($0 < 0 ? "arrow.down" : "minus") } ?? "minus"
-        let tint: Color = delta.map { $0 > 0 ? .orange : ($0 < 0 ? .green : .secondary) } ?? .secondary
-        return HStack(spacing: 3) {
-            Image(systemName: symbol)
-            Text(delta.map { "\(abs($0))°C" } ?? "—")
+        if let delta = series.change(over: 900).map({ Int($0.rounded()) }) {
+            changeRow(delta)
+        }
+    }
+
+    private func changeRow(_ delta: Int) -> some View {
+        HStack(spacing: 3) {
+            // Direction carries it; status colour belongs to Health Level alone, and a 1 °C drift
+            // painted orange is exactly the routine variation the alarmist rule warns about.
+            Image(systemName: delta > 0 ? "arrow.up" : (delta < 0 ? "arrow.down" : "minus"))
+            Text("\(abs(delta))°C")
         }
         .font(.callout.weight(.medium))
-        .foregroundStyle(tint)
+        .foregroundStyle(.secondary)
         .help("Change over the last 15 minutes")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(delta == 0 ? "No change over the last 15 minutes"
+                                       : "\(delta > 0 ? "Up" : "Down") \(abs(delta)) degrees over the last 15 minutes")
     }
 }
 
@@ -183,6 +192,7 @@ private struct SensorTable: View {
     let extremes: [String: ClosedRange<Double>]
     @State private var sort: Sort = .highest
     @State private var showAll = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum Sort: String, CaseIterable { case highest = "Highest first", name = "Name" }
 
@@ -216,8 +226,8 @@ private struct SensorTable: View {
                             .foregroundStyle(Self.tint(for: sensor.name)).frame(width: 18)
                         Text(sensor.name).lineLimit(1).truncationMode(.middle)
                         Text(Format.celsius(sensor.celsius)).fontWeight(.medium)
-                        Text(range.map { Format.celsius($0.lowerBound) } ?? "–").foregroundStyle(.secondary)
-                        Text(range.map { Format.celsius($0.upperBound) } ?? "–").foregroundStyle(.secondary)
+                        Text(range.map { Format.celsius($0.lowerBound) } ?? "").foregroundStyle(.secondary)
+                        Text(range.map { Format.celsius($0.upperBound) } ?? "").foregroundStyle(.secondary)
                     }
                     .monospacedDigit()
                 }
@@ -225,7 +235,9 @@ private struct SensorTable: View {
             HStack {
                 if sensors.count > Self.collapsedCount {
                     Button(showAll ? "Show fewer" : "View all \(sensors.count) sensors") {
-                        withAnimation(.snappy) { showAll.toggle() }
+                        // The one animation the app ships; Reduce Motion gets the same disclosure
+                        // without the expansion.
+                        withAnimation(reduceMotion ? nil : .snappy) { showAll.toggle() }
                     }
                     .buttonStyle(.link)
                 }
@@ -276,9 +288,12 @@ private struct FanStatus: View {
                 Text("Fan Status").font(.headline)
             }
             if let fans, !fans.isEmpty {
-                ForEach(fans) { fan in row(fan) }
+                ForEach(Array(fans.enumerated()), id: \.element.id) { index, fan in
+                    if index > 0 { Divider() }
+                    row(fan)
+                }
             } else if loaded {
-                Text("This Mac has no fans, or they can't be read.").foregroundStyle(.secondary)
+                InlineEmpty("This Mac has no fans, or they can't be read.")
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -313,8 +328,9 @@ private struct FanStatus: View {
                 }
             }
         }
-        .padding(10)
-        .background(.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        // No inner fill: this row already sits inside the Fan Status card, and a card in a card is
+        // the one nesting the system rules out. Rows separate by rhythm instead.
+        .padding(.vertical, 6)
     }
 }
 
@@ -329,8 +345,13 @@ private struct ThermalStateCard: View {
     @State private var series: HistorySeries?
     @State private var error: String?
 
+    /// Thermal bands read as marks on the card, so each has to clear 3:1 in both appearances —
+    /// `.yellow` at its own lightness measures about 1.5:1 on a light surface.
     private static let levels: [(state: ThermalState, color: Color)] = [
-        (.nominal, .green), (.fair, .yellow), (.serious, .orange), (.critical, .red),
+        (.nominal, Color.green.readableInk(on: .card, minimum: 3)),
+        (.fair, Color.yellow.readableInk(on: .card, minimum: 3)),
+        (.serious, Color.orange.readableInk(on: .card, minimum: 3)),
+        (.critical, Color.red.readableInk(on: .card, minimum: 3)),
     ]
 
     var body: some View {
@@ -361,7 +382,7 @@ private struct ThermalStateCard: View {
         } else if let series, !series.points.isEmpty {
             chart(series)
         } else {
-            placeholder(series == nil ? "Loading…" : "No data recorded in this range yet")
+            placeholder(series == nil ? "Reading history…" : "No data recorded in this range")
         }
     }
 

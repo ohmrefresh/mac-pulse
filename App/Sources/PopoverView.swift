@@ -103,13 +103,17 @@ struct PopoverView: View {
         let n = metrics.network, h = metrics.networkHealth
         return MetricRow(style: .network, title: "Network", value: nil, sparkline: nil) {
             HStack(spacing: 10) {
-                HStack(spacing: 2) {
-                    Image(systemName: "arrow.down").foregroundStyle(MetricStyle.network.tint)
-                    Text(n.map { Format.rate($0.downBytesPerSec) } ?? "--")
-                }
-                HStack(spacing: 2) {
-                    Image(systemName: "arrow.up").foregroundStyle(MetricStyle.upload.tint)
-                    Text(n.map { Format.rate($0.upBytesPerSec) } ?? "--")
+                // Throughput appears once the first delta exists; until then the row carries the
+                // badge alone rather than two dashes.
+                if let n {
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.down").foregroundStyle(MetricStyle.network.tint)
+                        Text(Format.rate(n.downBytesPerSec))
+                    }
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up").foregroundStyle(MetricStyle.upload.tint)
+                        Text(Format.rate(n.upBytesPerSec))
+                    }
                 }
                 Spacer(minLength: 4)
                 if let h {
@@ -187,7 +191,7 @@ private struct MetricRow<Trailing: View>: View {
             if value == nil && sparkline == nil {
                 trailing.gridCellColumns(3)
             } else {
-                Text(value ?? "--").monospacedDigit().lineLimit(1).fixedSize()
+                Text(value ?? "").monospacedDigit().lineLimit(1).fixedSize()
                 Group {
                     if let sparkline { sparkline } else { Color.clear.frame(height: 24) }
                 }
@@ -195,5 +199,7 @@ private struct MetricRow<Trailing: View>: View {
                 trailing.fixedSize().gridColumnAlignment(.trailing)
             }
         }
+        // One utterance per metric: the glyph and the sparkline say nothing aloud on their own.
+        .accessibilityElement(children: .combine)
     }
 }

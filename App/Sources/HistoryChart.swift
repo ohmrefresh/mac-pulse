@@ -19,6 +19,14 @@ enum ChartRange: TimeInterval, CaseIterable, Identifiable {
         case .month: "30 d"
         }
     }
+
+    /// The named option sets. A surface picks one of these rather than writing its own array, so
+    /// "1 h" means the same span and sits in the same place on every page.
+    ///
+    /// `stored` drops Live for surfaces that only read recorded history; `sensors` also drops 30 d,
+    /// because temperature is not kept that long.
+    static let stored: [ChartRange] = [.hour, .sixHours, .day, .week, .month]
+    static let sensors: [ChartRange] = [.hour, .sixHours, .day, .week]
 }
 
 struct ChartRangePicker: View {
@@ -171,7 +179,10 @@ struct HistoryChart: View {
         }
         .padding(8)
         .frame(minWidth: 130)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        // Opaque surface plus a hairline, like every other panel. Glass over a moving chart both
+        // breaks the flat rule and lets the plot show through the figures it is meant to explain.
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
 
     private var yTop: Double {

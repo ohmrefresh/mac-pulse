@@ -33,14 +33,24 @@ struct DeveloperView: View {
             Table(rows) {
                 TableColumn("Container") { c in
                     HStack(spacing: 6) {
-                        Circle().fill(c.isRunning ? Color.green : Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
+                        // Filled means running, hollow means not: the state is carried by the
+                        // shape, the family by the tint. Green here would read as Healthy, and
+                        // status colour belongs to Health Level.
+                        Group {
+                            if c.isRunning {
+                                Circle().fill(MetricStyle.developer.tint.readableInk(on: .card, minimum: 3))
+                            } else {
+                                Circle().strokeBorder(.secondary, lineWidth: 1)
+                            }
+                        }
+                        .frame(width: 7, height: 7)
                         Text(c.name)
                     }
                 }
                 TableColumn("Image") { Text($0.image).foregroundStyle(.secondary).lineLimit(1) }
                 TableColumn("Status") { Text($0.status).foregroundStyle(.secondary) }.width(140)
-                TableColumn("CPU") { c in Text(c.cpuPercent.map { "\(Format.decimal($0, places: 1))%" } ?? "–").monospacedDigit() }.width(60)
-                TableColumn("Memory") { c in Text(c.memoryBytes.map(Format.memory) ?? "–").monospacedDigit() }.width(80)
+                TableColumn("CPU") { c in Text(c.cpuPercent.map { "\(Format.decimal($0, places: 1))%" } ?? "").monospacedDigit() }.width(60)
+                TableColumn("Memory") { c in Text(c.memoryBytes.map(Format.memory) ?? "").monospacedDigit() }.width(80)
             }
             .frame(height: min(CGFloat(rows.count) * 26 + 32, 260))
         } else {
@@ -118,7 +128,7 @@ struct DeveloperView: View {
         Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
             GridRow {
                 Text("VPN").foregroundStyle(.secondary)
-                Text(config.map { $0.vpnActive ? "Connected (\($0.vpnInterfaces.joined(separator: ", ")))" : "Not connected" } ?? "–")
+                Text(config.map { $0.vpnActive ? "Connected (\($0.vpnInterfaces.joined(separator: ", ")))" : "Not connected" } ?? "Reading…")
             }
             GridRow {
                 Text("Proxy").foregroundStyle(.secondary)

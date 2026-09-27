@@ -7,6 +7,7 @@ struct DiagnosticsView: View {
     let metrics: LiveMetrics
     @Environment(\.dismiss) private var dismiss
     @State private var report: DiagnosticReport?
+    @State private var isRunning = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -15,6 +16,7 @@ struct DiagnosticsView: View {
                 Spacer()
                 if report != nil {
                     Button("Run Again") { Task { await run() } }
+                        .disabled(isRunning)
                 }
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
@@ -22,7 +24,11 @@ struct DiagnosticsView: View {
             Divider()
             Group {
                 if let report {
-                    results(report)
+                    // A re-run keeps the findings on screen: replacing a readable report with a
+                    // spinner throws away what the user was in the middle of reading.
+                    results(report).overlay(alignment: .top) {
+                        if isRunning { rerunBanner }
+                    }
                 } else {
                     VStack(spacing: 12) {
                         ProgressView()
@@ -36,9 +42,24 @@ struct DiagnosticsView: View {
         .task { await run() }
     }
 
+    /// Keeps the current report visible while the next one is gathered; only the first run has
+    /// nothing to show.
     private func run() async {
-        report = nil
+        isRunning = true
+        defer { isRunning = false }
         report = await metrics.runDiagnostics()
+    }
+
+    private var rerunBanner: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text("Checking again…").font(.caption)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(.background, in: Capsule())
+        .overlay(Capsule().strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+        .padding(.top, 8)
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     @ViewBuilder
@@ -78,11 +99,23 @@ private struct FindingCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    /// The card read as one finding: state, what was observed, what might explain it, what to do.
+    private var spoken: String {
+        ([finding.title, Format.health(finding.health)]
+         + finding.observed
+         + ["Possible cause: \(finding.possibleCause.text)",
+            "Recommendation: \(finding.recommendation)"])
+            .joined(separator: ". ")
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            // Sentence case, like every other label in the app.
+            Text(title).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             content()
         }
     }

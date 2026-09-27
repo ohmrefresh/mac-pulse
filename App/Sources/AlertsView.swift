@@ -47,7 +47,7 @@ struct AlertsView: View {
             }
             Section("Recent alerts (7 days)") {
                 if recentAlerts.isEmpty {
-                    Text("No alerts in the last 7 days.").foregroundStyle(.secondary)
+                    InlineEmpty("No alerts in the last 7 days.")
                 } else {
                     ForEach(recentAlerts) { EventRow(event: $0) }
                 }
@@ -82,6 +82,7 @@ private struct RuleRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Toggle("", isOn: $rule.isEnabled).toggleStyle(.switch).labelsHidden()
+                    .accessibilityLabel("\(rule.name) enabled")
                 TextField("Name", text: $rule.name).font(.headline).textFieldStyle(.plain).labelsHidden()
                 if isFiring { HealthBadge(level: rule.severity.health, label: "Firing") }
                 Spacer()
@@ -159,7 +160,7 @@ struct EventRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Circle().fill(event.severity.tint).frame(width: 8, height: 8)
+            SeverityMark(level: event.severity)
             Text(event.time, format: .dateTime.hour().minute().second())
                 .monospacedDigit().foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
@@ -167,5 +168,15 @@ struct EventRow: View {
                 if let detail = event.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
             }
         }
+        // Otherwise the mark, the clock and the text are read as three unrelated elements.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    private var spoken: String {
+        let time = event.time.formatted(date: .omitted, time: .standard)
+        return [Format.health(event.severity), time, event.title, event.detail]
+            .compactMap { $0 }
+            .joined(separator: ", ")
     }
 }

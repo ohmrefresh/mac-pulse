@@ -45,7 +45,7 @@ struct OverviewView: View {
 
     private var cpuCard: some View {
         MetricCard(title: "CPU", style: .cpu, health: metrics.cpuHealth) {
-            BigValue(metrics.cpu.map { Format.percent($0.totalPercent) })
+            BigValue(metrics.cpu.map { Format.percent($0.totalPercent) }, awaiting: "Reading CPU usage…")
             Text(metrics.processorName ?? " ").font(.callout).foregroundStyle(.secondary).lineLimit(1)
             Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100)
             FooterStats(stats: [
@@ -59,7 +59,7 @@ struct OverviewView: View {
     private var memoryCard: some View {
         let m = metrics.memory
         return MetricCard(title: "Memory", style: .memory, health: m?.pressure?.health) {
-            BigValue(m.map { Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes) })
+            BigValue(m.map { Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes) }, awaiting: "Reading memory…")
             Text(m.map { "\(Format.percent($0.usedPercent)) in use" } ?? " ").font(.callout).foregroundStyle(.secondary)
             Sparkline(values: metrics.memoryHistory.values, tint: MetricStyle.memory.tint, domain: 0...100)
             FooterStats(stats: [
@@ -75,8 +75,12 @@ struct OverviewView: View {
         return MetricCard(title: "Network", style: .network, health: h?.health,
                           healthLabel: h?.connectivity == .offline ? "Offline" : nil) {
             HStack(spacing: 16) {
-                rateLabel(n?.downBytesPerSec, arrow: "arrow.down", tint: MetricStyle.network.tint)
-                rateLabel(n?.upBytesPerSec, arrow: "arrow.up", tint: MetricStyle.upload.tint)
+                if let n {
+                    rateLabel(n.downBytesPerSec, arrow: "arrow.down", tint: MetricStyle.network.tint)
+                    rateLabel(n.upBytesPerSec, arrow: "arrow.up", tint: MetricStyle.upload.tint)
+                } else {
+                    Text("Reading throughput…").font(.callout).foregroundStyle(.secondary)
+                }
             }
             Text(n?.interface.map { "Interface \($0)" } ?? "No connection").font(.callout).foregroundStyle(.secondary)
             Sparkline(series: [
@@ -91,13 +95,13 @@ struct OverviewView: View {
         }
     }
 
-    private func rateLabel(_ value: Double?, arrow: String, tint: Color) -> some View {
+    private func rateLabel(_ value: Double, arrow: String, tint: Color) -> some View {
         HStack(spacing: 4) {
-            Text(value.map(Format.rate) ?? "--").font(.title2.weight(.semibold)).monospacedDigit()
+            Text(Format.rate(value)).font(.title2.weight(.semibold)).monospacedDigit()
             Image(systemName: arrow).foregroundStyle(tint).font(.headline)
         }
         .lineLimit(1)
-        .minimumScaleFactor(0.6)
+        .minimumScaleFactor(0.8)
     }
 
     private var diskCard: some View {
@@ -119,7 +123,8 @@ struct OverviewView: View {
                     .init(label: "Capacity", value: Format.bytesShort(d.totalBytes)),
                 ])
             } else {
-                BigValue(nil)
+                Text("No volume is reporting capacity.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
         }
     }
@@ -142,11 +147,18 @@ struct OverviewView: View {
         return b.isCharging ? "\(Format.duration(minutes: minutes)) until full" : "\(Format.duration(minutes: minutes)) remaining"
     }
 
+    /// What the headline figure means. With a °C reading the thermal state qualifies it; without
+    /// sensors the figure *is* the thermal state, so the caption names that instead of dashing it.
+    private func thermalCaption(_ s: SensorsReading?) -> String {
+        guard s?.cpuCelsius != nil else { return "macOS thermal state" }
+        return metrics.thermal.map { "CPU · thermal state \(Format.thermal($0))" } ?? "CPU die"
+    }
+
     private var temperatureCard: some View {
         let s = metrics.sensors
         return MetricCard(title: "Temperature", style: .temperature, health: metrics.thermal?.health) {
-            BigValue(s?.cpuCelsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal))
-            Text(s?.cpuCelsius != nil ? "CPU · thermal state \(metrics.thermal.map(Format.thermal) ?? "–")" : "macOS thermal state")
+            BigValue(s?.cpuCelsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal), awaiting: "Reading temperature…")
+            Text(thermalCaption(s))
                 .font(.callout).foregroundStyle(.secondary).lineLimit(1)
             Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint)
             if let s, !s.isEmpty {
@@ -168,24 +180,41 @@ struct OverviewView: View {
             Spacer(minLength: 8)
             Divider()
             HStack(alignment: .top) {
-                internetStat(value: h.map(MenuBarFormatter.latency) ?? "--", label: "Ping",
-                             icon: "circle.fill", tint: h?.health.tint ?? .secondary)
+                if let latency = h.map(MenuBarFormatter.latency) {
+                    internetStat(value: latency, label: "Ping",
+                                 icon: "circle.fill", tint: h?.health.markTint ?? .secondary)
+                }
                 Divider()
-                internetStat(value: metrics.network.map { Format.rate($0.downBytesPerSec) } ?? "--", label: "Download",
-                             icon: "arrow.down", tint: MetricStyle.network.tint)
+                if let down = metrics.network.map({ Format.rate($0.downBytesPerSec) }) {
+                    internetStat(value: down, label: "Download",
+                                 icon: "arrow.down", tint: MetricStyle.network.tint)
+                }
                 Divider()
-                internetStat(value: metrics.network.map { Format.rate($0.upBytesPerSec) } ?? "--", label: "Upload",
-                             icon: "arrow.up", tint: MetricStyle.upload.tint)
+                if let up = metrics.network.map({ Format.rate($0.upBytesPerSec) }) {
+                    internetStat(value: up, label: "Upload",
+                                 icon: "arrow.up", tint: MetricStyle.upload.tint)
+                }
             }
             .fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    /// Three stats share a third of the Overview grid, so at the 980pt window minimum the roomy
+    /// variant does not fit. Rather than shrink the figure toward illegibility, drop to a smaller
+    /// type step — the reading stays whole either way.
     private func internetStat(value: String, label: String, icon: String, tint: Color) -> some View {
+        ViewThatFits(in: .horizontal) {
+            internetStat(value: value, label: label, icon: icon, tint: tint, font: .title3)
+            internetStat(value: value, label: label, icon: icon, tint: tint, font: .callout)
+        }
+    }
+
+    private func internetStat(value: String, label: String, icon: String, tint: Color,
+                              font: Font) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: icon).foregroundStyle(tint).font(icon == "circle.fill" ? .system(size: 8) : .callout)
-                Text(value).font(.title3.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                Text(value).font(font.weight(.semibold)).monospacedDigit().lineLimit(1).fixedSize()
             }
             Text(label).font(.caption).foregroundStyle(.secondary)
         }

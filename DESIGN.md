@@ -183,7 +183,7 @@ Grouping is the job of the card, not of depth. Where two things must be told apa
 - **Nesting:** forbidden. A card never contains another card; inner grouping uses plain stacks.
 
 ### Metric cards
-The summary row. Tinted SF Symbol and title, optional Health badge trailing, then the headline figure with its trend delta beside a sparkline, and a caption below at full card width. They wrap two-up rather than compress: `LazyVGrid(.adaptive(minimum: 240))`, so at the 980pt window minimum the titles stay whole instead of truncating.
+The summary row. Tinted SF Symbol and title, optional Health badge trailing, then the headline figure with its trend delta beside a sparkline, and a caption below at full card width. They wrap rather than compress: `LazyVGrid(.adaptive(minimum: 240))`. At the 980pt window minimum a three-up row leaves a long title a few points short, so the title shrinks one notch (`minimumScaleFactor(0.85)`) instead of ellipsising — the word survives either way.
 
 ### Statistics rail
 The rail beside a chart (230pt, 7pt row rhythm, label left in Ink Secondary, value right in monospaced digits). **A row whose value is nil is omitted entirely** — this is the visual expression of the product's first principle. Rail height therefore varies by machine, and that is correct.
@@ -196,7 +196,20 @@ The rail beside a chart (230pt, 7pt row rhythm, label left in Ink Secondary, val
 - Charts expose one accessibility element announcing the latest value per series, not one element per mark.
 
 ### Health badge
-Capsule, 8×2px padding, caption weight medium, text in the Health tint over the same tint at 15%. The only component that changes colour with state.
+Capsule, 8×2px padding, caption weight medium, fill in the Health tint at 15%. The only component that changes colour with state.
+
+Its ink is **not** that same tint. Ink and fill drawn from one system colour measure under 2:1 in Light — the label disappears into its own capsule. The ink is the tint re-lit along OKLCH lightness until it clears 4.5:1 against the composited fill (`Color.readableInk(on:minimum:)`), which leaves Dark untouched because the system tint already clears the floor there. Status *marks* — the timeline dot, the severity glyphs, the thermal bands — take the same treatment at the 3:1 non-text floor via `HealthLevel.markTint`. Both floors are asserted by `StatusVocabularyTests`, through the real appearances, so a system-colour change fails the build.
+
+### Range picker
+One component, `ChartRangePicker`, in the trailing slot of `PageHeader` on every page that has a range — Performance, Network, Sensors, Timeline. Surfaces pick a **named option set** rather than writing an array: `ChartRange.allCases` where Live is meaningful, `ChartRange.stored` for surfaces that only read recorded history, `ChartRange.sensors` where 30 d is not retained. Timeline used to own a private `Range` enum that duplicated `ChartRange` value for value; it is gone. A filter that is not a range (Timeline's Category) sits on its own row below, never beside the range.
+
+### Empty states
+Two tiers, split by scale, each consistent within itself:
+- **Section empty** — `ContentUnavailableView`, centred, for a whole page or panel with nothing in it ("No events", "No problems detected", "Could not read history").
+- **Inline empty** — `InlineEmpty`, one line of secondary text, left-aligned, for a card that is otherwise fine ("No alerts in the last 7 days.", "No Bluetooth accessories reporting a battery level."). Five sections used to hand-roll this line.
+
+### Severity mark
+`SeverityMark` — the level's glyph in `markTint` at 11pt, with the level's name in the accessibility tree. It replaces the bare dot on every row whose only state signal was colour (timeline, alerts, Recent Activity). Shape escalates with the level: a closed circle for Healthy, a triangle for Warning, an octagon for Critical.
 
 ### Buttons
 - **Prominent:** used once per page at most, for the page's single action (Run Diagnostics).
@@ -210,7 +223,20 @@ Segmented, labels hidden, `fixedSize()`. Range (Live…30d) sits in the page hea
 
 **The Stock Control Rule.** If AppKit or SwiftUI ships the affordance, use it. A custom row that merely looks clickable is a regression — it loses hover, focus ring and keyboard reachability that the stock control gives for free.
 
-**The Nil Row Rule.** Components render `String?` and drop nil rows. Nothing displays an em dash for a value the machine cannot report.
+**The Fit Rule.** Nothing is sized by a guess about one locale and one text size.
+
+- **Type is semantic.** Every figure and label takes a text style, never a point size, so the system text-size setting moves them. The two exceptions were removed: the Sensors header glyph is `.largeTitle`, the severity mark rides its row's `.callout`.
+- **Shrink has a floor.** `minimumScaleFactor` never goes below 0.8. A figure allowed to shrink to 60% is a figure the user is asked to squint at.
+- **Past the floor, change the step, not the size.** `ViewThatFits` picks a smaller type step — the Overview's internet stats drop from `.title3` to `.callout` at the window minimum — so the reading stays whole rather than ellipsising.
+- **Table columns carry `min`/`ideal`, never a fixed width.** The flexible column (Processes' Name) takes the slack and holds a floor of its own. Fixed widths were sized for English and the Gregorian calendar; `26/09/2569 BE` does not fit them.
+- **Dates are formatted for their column.** Today shows the clock; older rows show a numeric date. An abbreviated date plus a time overruns any width once the calendar is not Gregorian.
+
+**The Nil Row Rule.** Components render `String?` and drop nil rows: `StatRail`, `FooterStats` and `KeyValue` all omit themselves rather than print a placeholder, and a sensor tile this Mac cannot fill is never built. Nothing displays an em dash for a value the machine cannot report.
+
+Absence has three shapes, and the difference is the point:
+- **Not yet** — a reading that is coming. `BigValue(_:awaiting:)` holds the headline's height and says what is on its way ("Reading CPU usage…"), the same contract `TimeSeriesChart` uses for a plot with fewer than two points.
+- **Not on this Mac** — a reading that will never arrive. The row, stat or tile is absent, and where a whole card would otherwise be empty it says so in its own words ("No volume is reporting capacity.").
+- **Nothing to report** — a real reading whose answer is "no change". The Sensors delta row is absent until the series spans its 15-minute window, rather than showing a minus beside a dash.
 
 ## 6. Do's and Don'ts
 
@@ -222,7 +248,7 @@ Segmented, labels hidden, `fixedSize()`. Range (Live…30d) sits in the page hea
 - **Do** write multi-word labels in sentence case, and keep the machine's own words ("Cores (Super)") exactly as the machine gives them.
 - **Do** verify both appearances on screen. A ramp that reads well on dark can walk into a white background.
 - **Do** use stock controls so hover, focus and keyboard come from the system.
-- **Do** keep every meaningful graphic at ≥3:1 against its background, and print the value beside it so nothing is carried by colour alone.
+- **Do** keep every meaningful graphic at ≥3:1 against its background, and give it a second carrier so nothing is carried by colour alone: a printed value on charts and bars, a glyph on states. Health Level's glyphs are `HealthLevel.symbol` — filled check, triangle, octagon — drawn by `SeverityMark` on timeline and alert rows. Red and green are the pair 8% of men cannot separate, and a severity row has to survive a greyscale screenshot.
 
 ### Don't:
 - **Don't** ship **gamer/RGB monitoring skin** cues: neon gradients, animated gauges, glowing rings, carbon-fibre texture. Telemetry is evidence, not spectacle.
@@ -233,4 +259,4 @@ Segmented, labels hidden, `fixedSize()`. Range (Live…30d) sits in the page hea
 - **Don't** nest a card inside a card.
 - **Don't** introduce a second hue to separate parts of one metric. Step the tint, and draw the edge.
 - **Don't** show a dash, a zero, or an estimate where a real reading is unavailable.
-- **Don't** animate live data. Motion must convey state; a crossfade on a figure that updates every second fights the reading. The app currently ships no motion, so there is nothing to reduce — anything added later must honour Reduce Motion.
+- **Don't** animate live data. Motion must convey state; a crossfade on a figure that updates every second fights the reading. The app ships exactly one animation — the sensor table's disclosure — and it honours Reduce Motion (`@Environment(\.accessibilityReduceMotion)`, animation dropped to `nil`). Anything added later does the same.

@@ -119,6 +119,10 @@ extension HealthLevel {
 }
 
 struct HealthBadge: View {
+    /// How much of the tint the capsule fill carries. Ink is measured against this mix, not the
+    /// tint: the two are the same hue, so the fill is the only thing the label contrasts with.
+    static let fillOpacity = 0.15
+
     let level: HealthLevel
     var label: String?
 
@@ -127,7 +131,39 @@ struct HealthBadge: View {
             .font(.caption.weight(.medium))
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .foregroundStyle(level.tint)
-            .background(level.tint.opacity(0.15), in: Capsule())
+            .foregroundStyle(level.tint.readableInk(on: .tintedFill(Self.fillOpacity), minimum: 4.5))
+            .background(level.tint.opacity(Self.fillOpacity), in: Capsule())
+    }
+}
+
+extension HealthLevel {
+    /// The tint as a *mark* — a dot or glyph on a card, which WCAG 1.4.11 holds to 3:1.
+    var markTint: Color { tint.readableInk(on: .card, minimum: 3.0) }
+
+    /// The shape that carries the level when colour cannot: red and green are the pair 8% of men
+    /// cannot separate, and a severity dot printed at 8pt is the app's smallest colour-only signal.
+    /// Shapes escalate the way the levels do — a closed circle, a triangle, then an octagon.
+    var symbol: String {
+        switch self {
+        case .healthy: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .critical: "exclamationmark.octagon.fill"
+        case .unknown: "questionmark.circle"
+        }
+    }
+}
+
+/// A severity signal that survives greyscale: glyph first, tint second, name in the accessibility
+/// tree. Replaces the bare dot wherever a row's only state indicator was its colour.
+struct SeverityMark: View {
+    let level: HealthLevel
+    /// Rides the row's own text style so it tracks the system text-size setting.
+    var font: Font = .callout
+
+    var body: some View {
+        Image(systemName: level.symbol)
+            .font(font)
+            .foregroundStyle(level.markTint)
+            .accessibilityLabel(Format.health(level))
     }
 }

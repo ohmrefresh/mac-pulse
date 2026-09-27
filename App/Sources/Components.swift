@@ -121,6 +121,48 @@ enum OKLCH {
                 gamma(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
     }
 
+    /// The card surface each appearance draws (`cardBackground`'s `.background.secondary`). Ink is
+    /// measured against the card rather than the window because the card is the worse case in both
+    /// appearances: darker than the window in Light, lighter than it in Dark.
+    enum Surface {
+        static let light = (0.961, 0.961, 0.961)
+        static let dark = (0.157, 0.157, 0.165)
+    }
+
+    /// `alpha` of `color` over `surface` — what a tinted capsule fill actually measures. Ink drawn
+    /// on such a fill has to be compared against this, not against the tint it was mixed from.
+    static func composite(_ color: (Double, Double, Double), alpha: Double,
+                          over surface: (Double, Double, Double)) -> (Double, Double, Double) {
+        (color.0 * alpha + surface.0 * (1 - alpha),
+         color.1 * alpha + surface.1 * (1 - alpha),
+         color.2 * alpha + surface.2 * (1 - alpha))
+    }
+
+    /// The tint re-lit until it clears `minimum` against `background`, keeping its own hue.
+    ///
+    /// Ink and fill taken from one system colour is the trap: at the tint's own lightness the pair
+    /// measures under 2:1 in Light. Walking lightness *away* from the background is the same move
+    /// `shade` makes, for the same reason — and returning the tint untouched when it already clears
+    /// the floor keeps the appearance that was already correct exactly as it was.
+    static func ink(for rgb: (Double, Double, Double), on background: (Double, Double, Double),
+                    dark: Bool, minimum: Double) -> (Double, Double, Double) {
+        guard contrast(rgb, background) < minimum else { return rgb }
+        let (_, chroma, hue) = toOKLCH(rgb)
+        let (bound, direction) = dark ? (0.98, 1.0) : (0.12, -1.0)
+        var lightness = toOKLCH(rgb).l
+        var last = rgb
+        while (direction > 0 && lightness < bound) || (direction < 0 && lightness > bound) {
+            lightness = min(max(lightness + direction * 0.01, 0), 1)
+            // Chroma has to fall as lightness approaches either extreme, or the colour turns
+            // garish and leaves the sRGB gamut.
+            let headroom = 1 - pow(abs(lightness - 0.5) * 2, 2)
+            last = toSRGB(lightness: lightness, chroma: max(chroma, 0.04) * (0.55 + 0.45 * headroom),
+                          hue: hue)
+            if contrast(last, background) >= minimum { return last }
+        }
+        return last
+    }
+
     /// WCAG relative luminance, for the contrast tests.
     static func luminance(_ rgb: (Double, Double, Double)) -> Double {
         func lin(_ v: Double) -> Double { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
@@ -130,6 +172,36 @@ enum OKLCH {
     static func contrast(_ a: (Double, Double, Double), _ b: (Double, Double, Double)) -> Double {
         let (x, y) = (luminance(a), luminance(b))
         return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+    }
+}
+
+extension Color {
+    /// What this colour sits on when it has to stay readable.
+    enum Backdrop {
+        case card
+        /// A fill mixed from this same colour at `alpha` — the status capsule and thermal banner.
+        case tintedFill(Double)
+    }
+
+    /// This colour re-lit for the appearance it is drawn in, so meaning carried by colour survives
+    /// both. A tint that already clears `minimum` is returned untouched.
+    func readableInk(on backdrop: Backdrop, minimum: Double) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            var resolved = NSColor.textColor
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = NSColor(self).usingColorSpace(.sRGB) ?? .textColor
+            }
+            let tint = (Double(resolved.redComponent), Double(resolved.greenComponent),
+                        Double(resolved.blueComponent))
+            let surface = dark ? OKLCH.Surface.dark : OKLCH.Surface.light
+            let background = switch backdrop {
+            case .card: surface
+            case .tintedFill(let alpha): OKLCH.composite(tint, alpha: alpha, over: surface)
+            }
+            let rgb = OKLCH.ink(for: tint, on: background, dark: dark, minimum: minimum)
+            return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        })
     }
 }
 
@@ -221,7 +293,9 @@ struct MetricCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: style.symbol).foregroundStyle(style.tint).font(.title3).frame(width: 24)
-                Text(title).font(.headline).lineLimit(1)
+                // At the 980pt window minimum a three-up grid leaves "Internet Health" a few
+                // points short. Shrinking the title slightly keeps the word; an ellipsis loses it.
+                Text(title).font(.headline).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 if let health { HealthBadge(level: health, label: healthLabel).fixedSize() }
             }
@@ -232,12 +306,30 @@ struct MetricCard<Content: View>: View {
     }
 }
 
+/// A card's headline figure. There is no dash: a figure that does not exist yet is replaced by one
+/// line saying what is coming (the same contract `TimeSeriesChart` uses for an empty plot), and a
+/// figure this Mac cannot report at all is not drawn by this view — the card says so in its own words.
 struct BigValue: View {
     let text: String?
-    init(_ text: String?) { self.text = text }
+    /// Shown in place of the figure until the first reading lands.
+    var awaiting: String = "Reading…"
+
+    init(_ text: String?, awaiting: String = "Reading…") {
+        self.text = text
+        self.awaiting = awaiting
+    }
 
     var body: some View {
-        Text(text ?? "--").font(.title.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+        if let text {
+            Text(text).font(.title.weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+        } else {
+            Text(awaiting)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                // Hold the headline's height so the card does not jump when the reading arrives.
+                .frame(height: NSFont.preferredFont(forTextStyle: .title1).boundingRectForFont.height,
+                       alignment: .leading)
+        }
     }
 }
 
@@ -254,14 +346,15 @@ struct FooterStats: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            ForEach(stats) { stat in
+            // Same rule as `StatRail`: a figure this Mac cannot report is absent, not dashed.
+            ForEach(stats.filter { $0.value != nil }) { stat in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 4) {
                         if let dot = stat.dot { Circle().fill(dot).frame(width: 7, height: 7) }
                         Text(stat.label).foregroundStyle(.secondary).lineLimit(1)
                     }
                     .font(.caption)
-                    Text(stat.value ?? "--").font(.callout.weight(.medium)).monospacedDigit().lineLimit(1)
+                    Text(stat.value ?? "").font(.callout.weight(.medium)).monospacedDigit().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .minimumScaleFactor(0.75)
@@ -310,8 +403,9 @@ struct DeltaLabel: View {
     var body: some View {
         if let value, abs(value) >= noiseFloor {
             HStack(spacing: 3) {
+                // Direction is the whole signal; status colour belongs to Health Level alone, and a
+                // 0.6% tick painted orange trains the user to ignore the colour that matters.
                 Image(systemName: value > 0 ? "arrow.up" : "arrow.down")
-                    .foregroundStyle(value > 0 ? Color.orange : Color.green)
                 Text(format(value)).monospacedDigit()
                 Text("vs 5m avg").foregroundStyle(.secondary)
             }
@@ -428,6 +522,21 @@ struct SubsectionHeader: View {
 }
 
 /// Mockup brand mark: pulse glyph on a blue rounded square.
+/// "Nothing here" *inside* a card, where `ContentUnavailableView`'s centred layout would be too
+/// loud. Five sections used to write this line by hand; the difference in intent from the
+/// section-level empty state is scale, so the two stay separate and each stays consistent.
+struct InlineEmpty: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct AppLogo: View {
     var size: CGFloat = 36
 

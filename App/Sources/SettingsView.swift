@@ -66,10 +66,10 @@ struct SettingsView: View {
                 Text("Enter an IPv4 address, e.g. 1.1.1.1. Still probing the last valid host.")
                     .font(.caption).foregroundStyle(.red)
             }
-            LabeledContent("Latency warning") { stepper($settings.latencyWarningMs, unit: "ms", step: 10, range: 10...5000) }
-            LabeledContent("Latency critical") { stepper($settings.latencyCriticalMs, unit: "ms", step: 10, range: 10...5000) }
-            LabeledContent("Packet loss warning") { stepper($settings.lossWarningPercent, unit: "%", step: 1, range: 1...100) }
-            LabeledContent("Packet loss critical") { stepper($settings.lossCriticalPercent, unit: "%", step: 1, range: 1...100) }
+            LabeledContent("Latency warning") { pairedStepper($settings.latencyWarningMs, unit: "ms", step: 10, range: 10...5000, atMost: settings.latencyCriticalMs) }
+            LabeledContent("Latency critical") { pairedStepper($settings.latencyCriticalMs, unit: "ms", step: 10, range: 10...5000, atLeast: settings.latencyWarningMs) }
+            LabeledContent("Packet loss warning") { pairedStepper($settings.lossWarningPercent, unit: "%", step: 1, range: 1...100, atMost: settings.lossCriticalPercent) }
+            LabeledContent("Packet loss critical") { pairedStepper($settings.lossCriticalPercent, unit: "%", step: 1, range: 1...100, atLeast: settings.lossWarningPercent) }
             Toggle("Look up public IP address", isOn: $settings.publicIPEnabled)
             Text("Asks 1.1.1.1 (Cloudflare) when the network changes and at most every 30 minutes.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -81,8 +81,8 @@ struct SettingsView: View {
     private var health: some View {
         Form {
             Section("CPU health (timeline and diagnostics)") {
-                LabeledContent("Warning at") { stepper($settings.cpuWarningPercent, unit: "%", step: 5, range: 10...100) }
-                LabeledContent("Critical at") { stepper($settings.cpuCriticalPercent, unit: "%", step: 5, range: 10...100) }
+                LabeledContent("Warning at") { pairedStepper($settings.cpuWarningPercent, unit: "%", step: 5, range: 10...100, atMost: settings.cpuCriticalPercent) }
+                LabeledContent("Critical at") { pairedStepper($settings.cpuCriticalPercent, unit: "%", step: 5, range: 10...100, atLeast: settings.cpuWarningPercent) }
             }
             Section("Diagnostics") {
                 LabeledContent("Slow gateway") { stepper($settings.gatewayLatencyMs, unit: "ms", step: 10, range: 10...2000) }
@@ -137,6 +137,19 @@ struct SettingsView: View {
 
     private func stepper(_ value: Binding<Double>, unit: String, step: Double, range: ClosedRange<Double>) -> some View {
         Stepper("\(Int(value.wrappedValue)) \(unit)", value: value, in: range, step: step).monospacedDigit()
+    }
+
+    /// A warning stepper that cannot climb past its critical partner, and a critical stepper that
+    /// cannot drop below its warning. The engine used to clamp `warning` silently, so Settings
+    /// could show a pair it was not actually using.
+    private func pairedStepper(_ value: Binding<Double>, unit: String, step: Double,
+                               range: ClosedRange<Double>, atMost ceiling: Double) -> some View {
+        stepper(value, unit: unit, step: step, range: range.lowerBound...Swift.min(ceiling, range.upperBound))
+    }
+
+    private func pairedStepper(_ value: Binding<Double>, unit: String, step: Double,
+                               range: ClosedRange<Double>, atLeast floor: Double) -> some View {
+        stepper(value, unit: unit, step: step, range: Swift.max(floor, range.lowerBound)...range.upperBound)
     }
 
     private func label(_ item: MenuBarItem) -> String {

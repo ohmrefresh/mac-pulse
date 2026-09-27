@@ -7,21 +7,7 @@ import PulseStore
 struct TimelineSectionView: View {
     let metrics: LiveMetrics
 
-    enum Range: TimeInterval, CaseIterable, Identifiable {
-        case hour = 3_600, sixHours = 21_600, day = 86_400, week = 604_800, month = 2_592_000
-        var id: Self { self }
-        var label: String {
-            switch self {
-            case .hour: "1 h"
-            case .sixHours: "6 h"
-            case .day: "24 h"
-            case .week: "7 d"
-            case .month: "30 d"
-            }
-        }
-    }
-
-    @State private var range: Range = .hour
+    @State private var range: ChartRange = .hour
     /// Owned by the dashboard so other sections (Sensors → "View History") can open a filtered timeline.
     @Binding var category: TimelineCategory?
     @State private var stored: [TimelineEvent] = []
@@ -29,15 +15,12 @@ struct TimelineSectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader("Timeline", subtitle: "What changed on this Mac, and when.")
-                .padding([.horizontal, .top], 24)
-                .padding(.bottom, 8)
+            PageHeader(title: "Timeline", subtitle: "What changed on this Mac, and when.") {
+                ChartRangePicker(range: $range, options: ChartRange.stored)
+            }
+            .padding([.horizontal, .top], 24)
+            .padding(.bottom, 8)
             HStack {
-                Picker("Range", selection: $range) {
-                    ForEach(Range.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
                 Picker("Category", selection: $category) {
                     Text("All categories").tag(TimelineCategory?.none)
                     ForEach(TimelineCategory.allCases, id: \.self) { Text($0.rawValue.capitalized).tag(Optional($0)) }
