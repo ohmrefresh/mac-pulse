@@ -49,6 +49,8 @@ struct HistoryChart: View {
     var format: (Double) -> String = { String(format: "%.0f", $0) }
     /// Hovering shows a rule with every line's value at that time.
     var showsHoverDetails = false
+    /// What the chart is of, for VoiceOver. The latest stored value per line is announced with it.
+    var accessibilityTitle: String?
 
     @State private var loaded: [Line: HistorySeries] = [:]
     @State private var error: String?
@@ -131,6 +133,20 @@ struct HistoryChart: View {
             }
         }
         .chartLegend(lines.count > 1 ? .visible : .hidden)
+        // One element for the whole chart; see TimeSeriesChart for why.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityTitle ?? lines.map(\.name).joined(separator: ", "))
+        .accessibilityValue(summary)
+    }
+
+    /// "CPU 12%, last 1 h" — the newest stored value per line over the selected range.
+    private var summary: String {
+        let latest = lines.compactMap { line -> String? in
+            guard let point = loaded[line]?.points.last else { return nil }
+            return "\(line.name) \(format(point.avg))"
+        }
+        guard !latest.isEmpty else { return "No data recorded in this range" }
+        return latest.joined(separator: ", ") + ", last \(range.label)"
     }
 
     /// Nearest recorded point of each line to `date` (within 2 buckets, or 90 s for sparse series like sensors).

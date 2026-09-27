@@ -12,7 +12,7 @@ enum Format {
         let units: [(Double, String)] = [(1e12, "TB"), (1e9, "GB"), (1e6, "MB")]
         for (scale, unit) in units where Double(value) >= scale {
             let v = Double(value) / scale
-            return v >= 10 ? "\(Int(v.rounded())) \(unit)" : String(format: "%.1f %@", v, unit)
+            return v >= 10 ? "\(decimal(v, places: 0)) \(unit)" : "\(decimal(v, places: 1)) \(unit)"
         }
         return bytes(value)
     }
@@ -42,8 +42,7 @@ enum Format {
     /// "19.8 / 32 GB" — used over total in the total's unit (mockup memory value).
     static func memoryUsage(used: UInt64, total: UInt64) -> String {
         let gib = 1_073_741_824.0
-        let t = Double(total) / gib, u = Double(used) / gib
-        return String(format: "%.1f / %.0f GB", u, t)
+        return "\(decimal(Double(used) / gib, places: 1)) / \(decimal(Double(total) / gib, places: 0)) GB"
     }
 
     static func batteryCondition(_ c: BatteryCondition) -> String {
@@ -56,6 +55,12 @@ enum Format {
     /// "3h 42m" for a minute count.
     static func duration(minutes: Int) -> String { "\(minutes / 60)h \(minutes % 60)m" }
 
+    /// Decimals the user's region agrees with: `String(format:)` always writes ".", so a machine
+    /// set to a comma-decimal locale would read "2.42 GHz" where the rest of macOS says "2,42 GHz".
+    static func decimal(_ value: Double, places: Int) -> String {
+        value.formatted(.number.precision(.fractionLength(places)).grouping(.automatic))
+    }
+
     /// "3d 12h 16m" — uptime, which is usually days rather than hours.
     static func uptime(_ seconds: TimeInterval) -> String {
         let total = Int(max(seconds, 0))
@@ -65,16 +70,16 @@ enum Format {
 
     /// "4.05 GHz". Frequencies are reported in hertz.
     static func frequency(_ hertz: Double) -> String {
-        String(format: "%.2f GHz", hertz / 1e9)
+        "\(decimal(hertz / 1e9, places: 2)) GHz"
     }
 
     /// "12.3 W", or milliwatts below a watt where a GPU spends most of its time.
     static func watts(_ value: Double) -> String {
-        value < 1 ? String(format: "%.0f mW", value * 1_000) : String(format: "%.2f W", value)
+        value < 1 ? "\(decimal(value * 1_000, places: 0)) mW" : "\(decimal(value, places: 2)) W"
     }
 
     /// Load average is a thread count, not a percentage, so it keeps two decimals.
-    static func load(_ value: Double) -> String { String(format: "%.2f", value) }
+    static func load(_ value: Double) -> String { decimal(value, places: 2) }
 
     static func health(_ level: HealthLevel) -> String {
         switch level {

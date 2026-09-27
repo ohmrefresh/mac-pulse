@@ -39,7 +39,7 @@ struct DeveloperView: View {
                 }
                 TableColumn("Image") { Text($0.image).foregroundStyle(.secondary).lineLimit(1) }
                 TableColumn("Status") { Text($0.status).foregroundStyle(.secondary) }.width(140)
-                TableColumn("CPU") { c in Text(c.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "–").monospacedDigit() }.width(60)
+                TableColumn("CPU") { c in Text(c.cpuPercent.map { "\(Format.decimal($0, places: 1))%" } ?? "–").monospacedDigit() }.width(60)
                 TableColumn("Memory") { c in Text(c.memoryBytes.map(Format.memory) ?? "–").monospacedDigit() }.width(80)
             }
             .frame(height: min(CGFloat(rows.count) * 26 + 32, 260))
@@ -88,7 +88,7 @@ struct DeveloperView: View {
                     GridRow {
                         RuntimeBadge(runtime: g.runtime)
                         Text("\(g.processes.count) process\(g.processes.count == 1 ? "" : "es")").foregroundStyle(.secondary)
-                        Text(String(format: "%.1f%% CPU", g.cpu)).monospacedDigit()
+                        Text("\(Format.decimal(g.cpu, places: 1))% CPU").monospacedDigit()
                         Text(Format.memory(g.processes.map(\.memoryBytes).reduce(0, +))).monospacedDigit()
                     }
                 }

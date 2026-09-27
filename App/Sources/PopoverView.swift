@@ -165,7 +165,7 @@ struct PopoverView: View {
                     Image(nsImage: icons.icon(for: process.pid)).resizable().frame(width: 20, height: 20)
                     Text(process.name).lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    Text(String(format: "%.1f%%", process.cpuPercent)).monospacedDigit().foregroundStyle(.secondary)
+                    Text("\(Format.decimal(process.cpuPercent, places: 1))%").monospacedDigit().foregroundStyle(.secondary)
                 }
             }
         }

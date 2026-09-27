@@ -38,7 +38,7 @@ struct ProcessesView: View {
             }
             TableColumn("PID", value: \.pid) { Text(String($0.pid)).monospacedDigit() }
                 .width(60)
-            TableColumn("CPU %", value: \.cpuPercent) { Text(String(format: "%.1f", $0.cpuPercent)).monospacedDigit() }
+            TableColumn("CPU %", value: \.cpuPercent) { Text(Format.decimal($0.cpuPercent, places: 1)).monospacedDigit() }
                 .width(70)
             TableColumn("Memory", value: \.memoryBytes) { Text(Format.memory($0.memoryBytes)).monospacedDigit() }
                 .width(90)

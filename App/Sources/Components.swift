@@ -219,6 +219,8 @@ struct StatRail: View {
                     Text(row.value ?? "").monospacedDigit().lineLimit(1)
                 }
                 .font(.callout)
+                // Otherwise VoiceOver reads the label and its value as two unrelated elements.
+                .accessibilityElement(children: .combine)
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
@@ -245,6 +247,10 @@ struct DeltaLabel: View {
             .font(.caption)
             .lineLimit(1)
             .fixedSize()
+            // The bare SF Symbol would otherwise be announced as "arrow up".
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(value > 0 ? "Up \(format(value))" : "Down \(format(value))")
+            .accessibilityHint("Compared with the five minute average")
         }
     }
 }
@@ -277,7 +283,11 @@ struct DonutChart: View {
             }
         }
         .frame(width: diameter, height: diameter)
+        // Each sector is an element by default; the legend beside the ring already lists every value.
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(centerValue) \(centerCaption)")
+        .accessibilityValue(slices.map { "\($0.label) \(Format.memory(UInt64(max($0.value, 0))))" }
+            .joined(separator: ", "))
     }
 }
 
@@ -339,8 +349,10 @@ struct SubsectionHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.title3.weight(.semibold))
-            if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
+            Text(title).font(.title3.weight(.semibold)).fixedSize()
+            // Hardware names come from the machine and can be long; truncate rather than shove the
+            // section's trailing controls off the edge.
+            if let subtitle { Text(subtitle).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
         }
     }
 }

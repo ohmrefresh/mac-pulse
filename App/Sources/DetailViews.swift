@@ -147,21 +147,25 @@ struct PerformanceView: View {
         case (.live, .perCore):
             TimeSeriesChart(series: perCoreSeries, interval: metrics.samplingInterval, maximum: 100,
                             format: { "\(Int($0))%" }, showsLegend: false,
-                            emphasis: { $0 == "Total" ? 2.2 : 1 })
+                            emphasis: { $0 == "Total" ? 2.2 : 1 },
+                            accessibilityTitle: "CPU usage per core")
         case (.live, .loadAverage):
             TimeSeriesChart(series: [.init(name: "Load (1m)", values: metrics.loadHistory.values, tint: MetricStyle.cpu.tint)],
-                            interval: metrics.samplingInterval, format: Format.load)
+                            interval: metrics.samplingInterval, format: Format.load,
+                            accessibilityTitle: "Load average")
         case (.live, .combined):
             TimeSeriesChart(series: [.init(name: "CPU", values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint)],
-                            interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" })
+                            interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" },
+                            accessibilityTitle: "CPU usage")
         case (_, .loadAverage):
             HistoryChart(history: metrics.history,
                          lines: [.init(kind: .loadAverage1, name: "Load (1m)", tint: MetricStyle.cpu.tint)],
-                         range: range, format: Format.load)
+                         range: range, format: Format.load, accessibilityTitle: "Load average")
         default:
             HistoryChart(history: metrics.history,
                          lines: [.init(kind: .cpuPercent, name: "CPU", tint: MetricStyle.cpu.tint)],
-                         range: range, maximum: 100, format: { "\(Int($0))%" })
+                         range: range, maximum: 100, format: { "\(Int($0))%" },
+                         accessibilityTitle: "CPU usage")
         }
     }
 
@@ -221,11 +225,13 @@ struct PerformanceView: View {
     @ViewBuilder private var gpuChart: some View {
         if range == .live {
             TimeSeriesChart(series: [.init(name: "GPU", values: metrics.gpuHistory.values, tint: MetricStyle.gpu.tint)],
-                            interval: metrics.gpuInterval, maximum: 100, format: { "\(Int($0))%" })
+                            interval: metrics.gpuInterval, maximum: 100, format: { "\(Int($0))%" },
+                            accessibilityTitle: "GPU usage")
         } else {
             HistoryChart(history: metrics.history,
                          lines: [.init(kind: .gpuPercent, name: "GPU", tint: MetricStyle.gpu.tint)],
-                         range: range, maximum: 100, format: { "\(Int($0))%" })
+                         range: range, maximum: 100, format: { "\(Int($0))%" },
+                         accessibilityTitle: "GPU usage")
         }
     }
 
@@ -261,11 +267,13 @@ struct PerformanceView: View {
             Group {
                 if range == .live {
                     TimeSeriesChart(series: memorySeries, interval: metrics.samplingInterval, maximum: 100,
-                                    format: { "\(Int($0))%" }, stacked: true)
+                                    format: { "\(Int($0))%" }, stacked: true,
+                                    accessibilityTitle: "Memory in use, by kind")
                 } else {
                     HistoryChart(history: metrics.history,
                                  lines: [.init(kind: .memoryPercent, name: "Used", tint: MetricStyle.memory.tint)],
-                                 range: range, maximum: 100, format: { "\(Int($0))%" })
+                                 range: range, maximum: 100, format: { "\(Int($0))%" },
+                                 accessibilityTitle: "Memory in use")
                 }
             }
             .frame(height: 200)

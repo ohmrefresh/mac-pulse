@@ -89,4 +89,25 @@ import PulseEngine
         #expect(Format.celsius(48.4) == "48°C")
         #expect(Format.health(.critical) == "Critical")
     }
+
+    /// `String(format:)` always writes a "." decimal; these must follow the user's region instead.
+    @Test func decimalsFollowTheLocale() {
+        #expect(Format.decimal(2.418, places: 2) == 2.418.formatted(.number.precision(.fractionLength(2))))
+        #expect(Format.frequency(4.608e9).hasSuffix(" GHz"))
+        #expect(Format.watts(0.365) == "\(Format.decimal(365, places: 0)) mW")
+        #expect(Format.watts(12.3) == "\(Format.decimal(12.3, places: 2)) W")
+        #expect(Format.load(1.5) == Format.decimal(1.5, places: 2))
+    }
+
+    /// Values a real machine can produce at the extremes, where a format can go ugly or wrong.
+    @Test func extremeValues() {
+        #expect(Format.uptime(0) == "0h 0m")
+        #expect(Format.uptime(-5) == "0h 0m")              // clock skew must not print a negative
+        #expect(Format.uptime(86_400 * 999 + 3_600) == "999d 1h 0m")
+        #expect(Format.frequency(0) == "\(Format.decimal(0, places: 2)) GHz")
+        #expect(Format.watts(0) == "\(Format.decimal(0, places: 0)) mW")
+        #expect(Format.memoryUsage(used: 0, total: 0) == "\(Format.decimal(0, places: 1)) / \(Format.decimal(0, places: 0)) GB")
+        #expect(Format.percent(0) == "0%")
+        #expect(Format.percent(1_000) == "1000%")          // a runaway reading still renders
+    }
 }

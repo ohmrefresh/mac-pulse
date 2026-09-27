@@ -22,6 +22,8 @@ struct TimeSeriesChart: View {
     var showsLegend = true
     /// Line width per series name, so one line (the CPU total) can be emphasised over the rest.
     var emphasis: (String) -> CGFloat = { _ in 1.4 }
+    /// What the chart is of, for VoiceOver ("CPU usage"). The latest value per series is announced with it.
+    var accessibilityTitle: String?
 
     var body: some View {
         let plotted = Self.fitted(series, interval: interval)
@@ -63,6 +65,22 @@ struct TimeSeriesChart: View {
             }
         }
         .chartLegend(showsLegend && series.count > 1 ? .visible : .hidden)
+        // Swift Charts makes every mark its own element: a per-core chart is thousands of them,
+        // which is unusable with VoiceOver. Collapse to one element that states the latest values.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityTitle ?? series.map(\.name).joined(separator: ", "))
+        .accessibilityValue(summary)
+    }
+
+    /// "CPU 12%, 5 minutes" — latest value per series, then the span the chart covers.
+    private var summary: String {
+        let latest = series.compactMap { s -> String? in
+            guard let value = s.values.last(where: { !$0.isNaN }) else { return nil }
+            return "\(s.name) \(format(value))"
+        }
+        let span = Self.ago(-Double(series.map(\.values.count).max() ?? 0) * interval)
+        guard !latest.isEmpty else { return "No data yet" }
+        return latest.joined(separator: ", ") + ", over \(span)"
     }
 
     private var yTop: Double {
