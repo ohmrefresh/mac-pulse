@@ -15,6 +15,16 @@ import PulseCollectors
         #expect(Dictionary(uniqueKeysWithValues: rows.map { ($0.kind, $0.value) }) == [.cpuPercent: 21, .thermalState: 2])
     }
 
+    @Test func temperaturesIncludeSSDBatteryAndHottest() {
+        var s = Snapshot()
+        s.sensors = SensorsReading(cpuCelsius: 38, ssdCelsius: 34, batteryCelsius: 31,
+                                   sensors: [TemperatureSensor(name: "PMU tcal", celsius: 52), TemperatureSensor(name: "PMU tdie1", celsius: 38)],
+                                   fans: [])
+        let values = Dictionary(uniqueKeysWithValues: HistorySamples.from(s, at: t).map { ($0.kind, $0.value) })
+        #expect(values[.cpuTemperatureC] == 38 && values[.ssdTemperatureC] == 34)
+        #expect(values[.batteryTemperatureC] == 31 && values[.hottestTemperatureC] == 52)
+    }
+
     @Test func probeReadingsSkipOfflineAndTimeouts() {
         let th = NetworkThresholds()
         let online = NetworkHealthReading.make(connectivity: .online,

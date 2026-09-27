@@ -6,6 +6,8 @@ import PulseCore
 /// so a metric looks the same everywhere (mockup palette; adapts to Light/Dark via system colors).
 enum MetricStyle {
     case cpu, memory, network, upload, disk, battery, temperature, internet, gpu, processes, developer, timeline, alerts
+    /// Sensor temperatures (Sensors page): SSD and battery get their own tints so chart lines stay distinct.
+    case ssdTemperature, batteryTemperature
 
     var tint: Color {
         switch self {
@@ -18,6 +20,8 @@ enum MetricStyle {
         case .processes, .timeline: .secondary
         case .developer: .brown
         case .alerts: .red
+        case .ssdTemperature: .teal
+        case .batteryTemperature: .yellow
         }
     }
 
@@ -36,6 +40,8 @@ enum MetricStyle {
         case .developer: "hammer"
         case .timeline: "clock"
         case .alerts: "bell"
+        case .ssdTemperature: "internaldrive"
+        case .batteryTemperature: "battery.75percent"
         }
     }
 }

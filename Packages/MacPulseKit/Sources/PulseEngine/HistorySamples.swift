@@ -21,6 +21,9 @@ enum HistorySamples {
         add(.thermalState, s.thermal.map { Double($0.rawValue) })
         add(.gpuPercent, s.gpu?.utilizationPercent)
         add(.cpuTemperatureC, s.sensors?.cpuCelsius)
+        add(.ssdTemperatureC, s.sensors?.ssdCelsius)
+        add(.batteryTemperatureC, s.sensors?.batteryCelsius)
+        add(.hottestTemperatureC, s.sensors?.hottest?.celsius)
         add(.fanRPM, s.sensors?.fans.map(\.rpm).max())
         return out
     }

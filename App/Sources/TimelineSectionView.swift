@@ -22,7 +22,8 @@ struct TimelineSectionView: View {
     }
 
     @State private var range: Range = .hour
-    @State private var category: TimelineCategory?
+    /// Owned by the dashboard so other sections (Sensors → "View History") can open a filtered timeline.
+    @Binding var category: TimelineCategory?
     @State private var stored: [TimelineEvent] = []
     @State private var loadError: String?
 

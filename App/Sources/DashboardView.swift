@@ -1,4 +1,5 @@
 import SwiftUI
+import PulseCore
 import PulseEngine
 
 enum DashboardSection: String, CaseIterable, Identifiable {
@@ -52,6 +53,7 @@ struct DashboardView: View {
     @State private var showDiagnostics = false
     /// Toolbar search; typing jumps to Processes, which filters by it.
     @State private var search = ""
+    @State private var timelineCategory: TimelineCategory?
 
     var body: some View {
         NavigationSplitView {
@@ -81,9 +83,12 @@ struct DashboardView: View {
             case .developer: DeveloperView(metrics: metrics, settings: settings)
             case .storage: StorageView(metrics: metrics)
             case .battery: BatteryView(metrics: metrics)
-            case .sensors: SensorsView(metrics: metrics)
+            case .sensors: SensorsView(metrics: metrics, showThermalHistory: {
+                timelineCategory = .thermal
+                selection = .timeline
+            })
             case .alerts: AlertsView(metrics: metrics, settings: settings, notifier: notifier)
-            case .timeline: TimelineSectionView(metrics: metrics)
+            case .timeline: TimelineSectionView(metrics: metrics, category: $timelineCategory)
             }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Search processes")

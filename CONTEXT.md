@@ -73,6 +73,9 @@ The address the internet sees, looked up only when the user opts in.
 A named temperature source read through private interfaces; may be unavailable after a macOS update.
 _Avoid_: probe (a Probe is a network test)
 
+**Hottest Sensor**:
+The warmest temperature Sensor at a given moment, named. Informational, like every °C reading.
+
 **Fan Speed**:
 Revolutions per minute reported by the SMC; 0 means the fan is stopped, which is normal when cool.
 

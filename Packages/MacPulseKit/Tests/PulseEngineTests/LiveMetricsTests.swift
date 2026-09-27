@@ -28,8 +28,27 @@ import PulseCollectors
         m.apply(s)
         #expect(m.batteryHistory.values == [80])
         #expect(m.temperatureHistory.values == [52])
+        #expect(m.hottestTemperatureHistory.values.isEmpty)   // no named sensors in this reading
         #expect(m.cpuHealth == .healthy)
         #expect(m.cpuFiveMinutePeak == 20)
+    }
+
+    @Test func sensorExtremesAndFifteenMinuteChange() {
+        let m = LiveMetrics()
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        func reading(_ die: Double, _ nand: Double) -> SensorsReading {
+            SensorsReading(cpuCelsius: die, ssdCelsius: nand, batteryCelsius: nil,
+                           sensors: [TemperatureSensor(name: "PMU tdie1", celsius: die), TemperatureSensor(name: "NAND CH0 temp", celsius: nand)],
+                           fans: [])
+        }
+        m.applySensors(reading(40, 30), at: t0)
+        m.applySensors(reading(55, 33), at: t0.addingTimeInterval(600))
+        #expect(m.temperatureHistory.change(over: 900) == nil)           // spans only 10 min
+        m.applySensors(reading(45, 31), at: t0.addingTimeInterval(960))
+        #expect(m.temperatureHistory.change(over: 900) == 5)             // 45 now − 40 at t0
+        #expect(m.hottestTemperatureHistory.values == [40, 55, 45])
+        #expect(m.sensorExtremes["PMU tdie1"] == 40...55)
+        #expect(m.sensorExtremes["NAND CH0 temp"] == 30...33)
     }
 
     @Test func latencyHistoryMarksTimeoutsAndSkipsOffline() {

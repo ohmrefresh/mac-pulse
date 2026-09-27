@@ -23,9 +23,10 @@ enum ChartRange: TimeInterval, CaseIterable, Identifiable {
 
 struct ChartRangePicker: View {
     @Binding var range: ChartRange
+    var options: [ChartRange] = ChartRange.allCases
     var body: some View {
         Picker("Range", selection: $range) {
-            ForEach(ChartRange.allCases) { Text($0.label).tag($0) }
+            ForEach(options) { Text($0.label).tag($0) }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
@@ -46,9 +47,12 @@ struct HistoryChart: View {
     let range: ChartRange
     var maximum: Double?
     var format: (Double) -> String = { String(format: "%.0f", $0) }
+    /// Hovering shows a rule with every line's value at that time.
+    var showsHoverDetails = false
 
     @State private var loaded: [Line: HistorySeries] = [:]
     @State private var error: String?
+    @State private var hoverDate: Date?
 
     var body: some View {
         Group {
@@ -91,6 +95,31 @@ struct HistoryChart: View {
                     }
                 }
             }
+            if let hoverDate {
+                RuleMark(x: .value("Time", hoverDate))
+                    .foregroundStyle(.secondary.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    .annotation(position: .top, alignment: .center, spacing: 0,
+                                overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                        hoverDetails(at: hoverDate)
+                    }
+            }
+        }
+        .chartOverlay { proxy in
+            if showsHoverDetails {
+                GeometryReader { geo in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            switch phase {
+                            case .active(let location):
+                                guard let frame = proxy.plotFrame else { return }
+                                hoverDate = proxy.value(atX: location.x - geo[frame].origin.x, as: Date.self)
+                            case .ended:
+                                hoverDate = nil
+                            }
+                        }
+                }
+            }
         }
         .chartForegroundStyleScale(domain: lines.map(\.name), range: lines.map(\.tint))
         .chartXScale(domain: Date().addingTimeInterval(-range.rawValue)...Date())
@@ -102,6 +131,30 @@ struct HistoryChart: View {
             }
         }
         .chartLegend(lines.count > 1 ? .visible : .hidden)
+    }
+
+    /// Nearest recorded point of each line to `date` (within 2 buckets, or 90 s for sparse series like sensors).
+    private func hoverDetails(at date: Date) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(date, format: range.rawValue > 86_400 ? .dateTime.weekday().hour().minute() : .dateTime.hour().minute())
+                .font(.caption.weight(.semibold))
+            ForEach(lines, id: \.self) { line in
+                if let series = loaded[line],
+                   let point = series.points.min(by: { abs($0.time.timeIntervalSince(date)) < abs($1.time.timeIntervalSince(date)) }),
+                   abs(point.time.timeIntervalSince(date)) <= max(Double(series.stepSeconds) * 2, 90) {
+                    HStack(spacing: 6) {
+                        Circle().fill(line.tint).frame(width: 7, height: 7)
+                        Text(line.name)
+                        Spacer(minLength: 12)
+                        Text(format(point.avg)).monospacedDigit().fontWeight(.medium)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+        .padding(8)
+        .frame(minWidth: 130)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var yTop: Double {

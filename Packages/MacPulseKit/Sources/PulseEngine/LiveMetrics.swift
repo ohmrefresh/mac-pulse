@@ -34,8 +34,13 @@ public final class LiveMetrics {
     public private(set) var upHistory = RecentSeries(capacity: 300)
     /// Battery percent per battery sample (5 s cadence → 10 min).
     public private(set) var batteryHistory = RecentSeries(capacity: 120)
-    /// CPU °C per sensor sample (5–60 s cadence depending on visibility).
-    public private(set) var temperatureHistory = RecentSeries(capacity: 60)
+    /// °C per sensor sample (5–60 s cadence depending on visibility), timestamped for 15-min changes.
+    public private(set) var temperatureHistory = TimedSeries(capacity: 240)
+    public private(set) var ssdTemperatureHistory = TimedSeries(capacity: 240)
+    public private(set) var batteryTemperatureHistory = TimedSeries(capacity: 240)
+    public private(set) var hottestTemperatureHistory = TimedSeries(capacity: 240)
+    /// Lowest and highest reading of each Sensor since launch, by sensor name.
+    public private(set) var sensorExtremes: [String: ClosedRange<Double>] = [:]
     /// Debounced CPU Health Level from the user's CPU thresholds; matches the timeline.
     public private(set) var cpuHealth: HealthLevel?
     /// Internet round trip per probe (5 s cadence → 5 min). Timeouts are stored as NaN so charts show gaps.
@@ -311,15 +316,24 @@ public final class LiveMetrics {
         }
         if let v = s.processes { processes = v }
         if let v = s.gpu { gpu = v }
-        if let v = s.sensors {
-            sensors = v
-            if let c = v.cpuCelsius { temperatureHistory.append(c) }
-        }
+        if let v = s.sensors { applySensors(v, at: Date()) }
         if let v = s.peripheralBatteries { peripheralBatteries = v }
         let now = Date()
         for event in timeline.observe(s, at: now) { post(event) }
         if s.cpu != nil { cpuHealth = timeline.reportedHealth(.cpu) }
         evaluateAlerts(Self.alertValues(s), at: now)
+    }
+
+    func applySensors(_ v: SensorsReading, at now: Date) {
+        sensors = v
+        if let c = v.cpuCelsius { temperatureHistory.append(c, at: now) }
+        if let c = v.ssdCelsius { ssdTemperatureHistory.append(c, at: now) }
+        if let c = v.batteryCelsius { batteryTemperatureHistory.append(c, at: now) }
+        if let c = v.hottest?.celsius { hottestTemperatureHistory.append(c, at: now) }
+        for sensor in v.sensors {
+            let r = sensorExtremes[sensor.name]
+            sensorExtremes[sensor.name] = min(r?.lowerBound ?? sensor.celsius, sensor.celsius)...max(r?.upperBound ?? sensor.celsius, sensor.celsius)
+        }
     }
 
     static func alertValues(_ s: Snapshot) -> [(AlertMetric, Double)] {

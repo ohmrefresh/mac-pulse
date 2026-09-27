@@ -8,6 +8,11 @@ public struct TemperatureSensor: Sendable, Equatable, Identifiable {
     public var name: String
     public var celsius: Double
     public var id: String { name }
+
+    public init(name: String, celsius: Double) {
+        self.name = name
+        self.celsius = celsius
+    }
 }
 
 public struct FanReading: Sendable, Equatable, Identifiable {
@@ -28,6 +33,8 @@ public struct SensorsReading: Sendable, Equatable {
     public var fans: [FanReading]
 
     public var isEmpty: Bool { sensors.isEmpty && fans.isEmpty }
+    /// The warmest sensor right now.
+    public var hottest: TemperatureSensor? { sensors.max { $0.celsius < $1.celsius } }
 
     public init(cpuCelsius: Double?, ssdCelsius: Double?, batteryCelsius: Double?, sensors: [TemperatureSensor], fans: [FanReading]) {
         self.cpuCelsius = cpuCelsius
