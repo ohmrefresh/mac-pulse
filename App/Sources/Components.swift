@@ -50,15 +50,86 @@ extension MetricStyle {
     /// Stepped shades of the one metric tint, for charts with several parts of the same family
     /// (memory ring and bands, per-core lines). Keeps the one-tint-per-metric rule intact.
     ///
-    /// Opacity alone is not enough: over a dark background every step still reads as the same
-    /// bright hue. Desaturating while lightening walks the tint from deep to pale, which separates
-    /// in both appearances.
+    /// The ramp walks *away* from the background: darker as it steps in Light, lighter in Dark.
+    /// A single direction cannot serve both — lightening on white walks into the background, which
+    /// is what put the palest memory bands under the 3:1 non-text contrast floor. Steps are spaced
+    /// in OKLCH so they look evenly separated rather than evenly numbered.
     func shade(_ index: Int, of count: Int) -> Color {
-        guard count > 1, let base = NSColor(tint).usingColorSpace(.deviceRGB) else { return tint }
-        let step = Double(min(index, count - 1)) / Double(count - 1)
-        return Color(hue: Double(base.hueComponent),
-                     saturation: Double(base.saturationComponent) * (1 - 0.7 * step),
-                     brightness: min(Double(base.brightnessComponent) * (1 + 0.4 * step), 1))
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            var resolved = NSColor.textColor
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = NSColor(self.tint).usingColorSpace(.sRGB) ?? .textColor
+            }
+            let rgb = OKLCH.shade(of: (Double(resolved.redComponent), Double(resolved.greenComponent),
+                                       Double(resolved.blueComponent)),
+                                  index: index, count: count, dark: dark)
+            return NSColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        })
+    }
+}
+
+/// Perceptual color stepping. HSB steps the same distance twice and look uneven; OKLCH lightness
+/// is perceptually uniform, so a ramp built on it reads as evenly spaced.
+enum OKLCH {
+    /// Lightness band each appearance ramps across, chosen by sweeping for the widest spread that
+    /// still keeps every step at 3:1 against its own background.
+    ///
+    /// Five steps of one hue cannot also hit 3:1 against *each other* — that geometry does not
+    /// exist — so band edges are drawn instead: the ring insets its sectors and the stacked chart
+    /// draws a hairline at each boundary. Fills carry the family, boundaries carry the separation.
+    static let lightBand = (top: 0.66, bottom: 0.28)
+    static let darkBand = (top: 0.56, bottom: 0.92)
+
+    /// Step `index` of `count` along the tint's own hue.
+    static func shade(of rgb: (Double, Double, Double), index: Int, count: Int, dark: Bool) -> (Double, Double, Double) {
+        let (lightness, chroma, hue) = toOKLCH(rgb)
+        guard count > 1 else { return rgb }
+        let step = Double(min(max(index, 0), count - 1)) / Double(count - 1)
+        let band = dark ? darkBand : lightBand
+        let target = band.0 + (band.1 - band.0) * step
+        // Chroma has to fall as lightness approaches either extreme or the color turns garish and
+        // leaves the sRGB gamut; scale it by how much headroom the target lightness leaves.
+        let headroom = 1 - pow(abs(target - 0.5) * 2, 2)
+        let scaled = max(chroma, 0.04) * (0.55 + 0.45 * headroom)
+        return toSRGB(lightness: target, chroma: scaled, hue: lightness > 0 ? hue : 0)
+    }
+
+    static func toOKLCH(_ rgb: (Double, Double, Double)) -> (l: Double, c: Double, h: Double) {
+        func linear(_ v: Double) -> Double { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let (r, g, b) = (linear(rgb.0), linear(rgb.1), linear(rgb.2))
+        let l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        let m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        let s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+        let lightness = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+        let a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s
+        let bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s
+        return (lightness, (a * a + bb * bb).squareRoot(), atan2(bb, a))
+    }
+
+    static func toSRGB(lightness: Double, chroma: Double, hue: Double) -> (Double, Double, Double) {
+        let a = chroma * cos(hue), b = chroma * sin(hue)
+        let l = pow(lightness + 0.3963377774 * a + 0.2158037573 * b, 3)
+        let m = pow(lightness - 0.1055613458 * a - 0.0638541728 * b, 3)
+        let s = pow(lightness - 0.0894841775 * a - 1.2914855480 * b, 3)
+        func gamma(_ v: Double) -> Double {
+            let c = max(min(v, 1), 0)
+            return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055
+        }
+        return (gamma(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+                gamma(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+                gamma(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
+    }
+
+    /// WCAG relative luminance, for the contrast tests.
+    static func luminance(_ rgb: (Double, Double, Double)) -> Double {
+        func lin(_ v: Double) -> Double { v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return 0.2126 * lin(rgb.0) + 0.7152 * lin(rgb.1) + 0.0722 * lin(rgb.2)
+    }
+
+    static func contrast(_ a: (Double, Double, Double), _ b: (Double, Double, Double)) -> Double {
+        let (x, y) = (luminance(a), luminance(b))
+        return (max(x, y) + 0.05) / (min(x, y) + 0.05)
     }
 }
 

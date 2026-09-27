@@ -49,6 +49,19 @@ struct TimeSeriesChart: View {
                     }
                 }
             }
+            // Shades of one hue cannot reach 3:1 against each other, so each band edge is drawn in
+            // the surface color: the boundary is identifiable even where two fills sit close.
+            ForEach(Array((stacked ? Self.boundaries(plotted.series) : []).enumerated()), id: \.offset) { band, line in
+                ForEach(Array(line.enumerated()), id: \.offset) { index, value in
+                    if !value.isNaN {
+                        LineMark(x: .value("Seconds ago", -Double(line.count - 1 - index) * plotted.interval),
+                                 y: .value("Boundary", value),
+                                 series: .value("Series", "boundary-\(band)"))
+                            .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                    }
+                }
+            }
         }
         .chartForegroundStyleScale(domain: series.map(\.name), range: series.map(\.tint))
         .chartYScale(domain: 0...yTop)
@@ -100,6 +113,23 @@ struct TimeSeriesChart: View {
         let factor = Int((Double(marks) / Double(pointBudget)).rounded(.up))
         return (series.map { Series(name: $0.name, values: downsampled($0.values, by: factor), tint: $0.tint) },
                 interval * Double(factor))
+    }
+
+    /// Running totals at each internal band edge of a stacked chart, oldest first. The outermost
+    /// edge is left out: it borders the plot area, which already reads as an edge.
+    static func boundaries(_ series: [Series]) -> [[Double]] {
+        guard series.count > 1 else { return [] }
+        let length = series.map(\.values.count).max() ?? 0
+        guard length > 0 else { return [] }
+        var running = [Double](repeating: 0, count: length)
+        return series.dropLast().map { s in
+            let offset = length - s.values.count
+            for index in 0..<length where index >= offset {
+                let value = s.values[index - offset]
+                running[index] += value.isNaN ? 0 : value
+            }
+            return running
+        }
     }
 
     /// Peak of each bucket, oldest first. All-NaN buckets stay NaN so gaps remain gaps.
