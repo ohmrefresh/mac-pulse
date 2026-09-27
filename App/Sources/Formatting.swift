@@ -68,6 +68,11 @@ enum Format {
         String(format: "%.2f GHz", hertz / 1e9)
     }
 
+    /// "12.3 W", or milliwatts below a watt where a GPU spends most of its time.
+    static func watts(_ value: Double) -> String {
+        value < 1 ? String(format: "%.0f mW", value * 1_000) : String(format: "%.2f W", value)
+    }
+
     /// Load average is a thread count, not a percentage, so it keeps two decimals.
     static func load(_ value: Double) -> String { String(format: "%.2f", value) }
 

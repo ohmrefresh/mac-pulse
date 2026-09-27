@@ -152,3 +152,73 @@ import PulseCore
         #expect(r.freeBytes == 0)
     }
 }
+
+@Suite struct FrequencyMathTests {
+    @Test func dvfsTableIsPairsOfFrequencyAndVoltage() {
+        var data = Data()
+        for (frequency, voltage) in [(600_000, 500), (1_200_000, 700), (0, 0)] {
+            data.append(contentsOf: withUnsafeBytes(of: UInt32(frequency).littleEndian) { Array($0) })
+            data.append(contentsOf: withUnsafeBytes(of: UInt32(voltage).littleEndian) { Array($0) })
+        }
+        #expect(FrequencyMath.states(from: data) == [600_000, 1_200_000])   // padding dropped
+        #expect(FrequencyMath.states(from: Data([1, 2, 3])).isEmpty)
+    }
+
+    @Test func tablesScaleToHertzWhateverTheirUnit() {
+        #expect(FrequencyMath.normalizeToHertz([1_300_000, 4_600_000]) == [1.3e9, 4.6e9])   // kHz
+        #expect(FrequencyMath.normalizeToHertz([338_000_000, 1_620_000_000]) == [3.38e8, 1.62e9])   // Hz
+        #expect(FrequencyMath.normalizeToHertz([600, 1_620]) == [6e8, 1.62e9])   // MHz
+        #expect(FrequencyMath.normalizeToHertz([]).isEmpty)
+        #expect(FrequencyMath.normalizeToHertz([3, 7]).isEmpty)   // not a frequency table
+    }
+
+    @Test func frequencyIsWeightedByResidency() throws {
+        let frequency = try #require(FrequencyMath.weightedFrequency(residencies: [10, 30], frequencies: [1e9, 3e9]))
+        #expect(abs(frequency - 2.5e9) < 1)
+        // A cluster parked for the whole interval has no frequency to report.
+        #expect(FrequencyMath.weightedFrequency(residencies: [0, 0], frequencies: [1e9, 3e9]) == nil)
+    }
+
+    @Test func powerScalesByTheChannelsOwnEnergyUnit() throws {
+        // CPU Energy arrives in mJ, GPU Energy in nJ on the same machine.
+        #expect(try #require(FrequencyMath.watts(energy: 12_300, unit: "mJ", seconds: 1)) == 12.3)
+        #expect(try #require(FrequencyMath.watts(energy: 42_579_840, unit: "nJ", seconds: 1)) < 0.05)
+        #expect(try #require(FrequencyMath.watts(energy: 2_000_000, unit: "uJ", seconds: 2)) == 1)
+        #expect(FrequencyMath.watts(energy: 100, unit: "mJ", seconds: 0) == nil)
+        #expect(FrequencyMath.watts(energy: 100, unit: "widgets", seconds: 1) == nil)
+    }
+}
+
+@Suite struct IOReportLiveTests {
+    /// ADR 0003: private interfaces may vanish in a macOS update, so an absent client is not a failure.
+    @Test func liveReadingIsPlausibleWhenAvailable() async throws {
+        guard let client = IOReportClient() else { return }
+        _ = client.sample()                       // first call only primes the baseline
+        try await Task.sleep(for: .milliseconds(600))
+        guard let reading = client.sample() else { return }
+        if let current = reading.cpuCurrentHz, let max = reading.cpuMaxHz {
+            #expect(max > 1e9 && max < 1e11)      // 1–100 GHz
+            #expect(current >= 0 && current <= max * 1.05)
+        }
+        if let watts = reading.gpuPowerWatts {
+            #expect(watts >= 0 && watts < 500)
+        }
+    }
+}
+
+@Suite struct DVFSTableTests {
+    @Test func onlyMonotonicPlausibleLaddersCount() {
+        #expect(FrequencyMath.isFrequencyLadder([1.3e9, 2.4e9, 4.6e9]))
+        #expect(!FrequencyMath.isFrequencyLadder([14.2e9, 50.1e9]))     // decodes to tens of GHz
+        #expect(!FrequencyMath.isFrequencyLadder([4.6e9, 1.3e9]))       // descending
+        #expect(!FrequencyMath.isFrequencyLadder([1e9]))
+        #expect(!FrequencyMath.isFrequencyLadder([1e6, 2e6]))           // far too low
+    }
+
+    @Test func liveTablesAreAllPlausible() {
+        let tables = IOReportClient.dvfsTables()
+        #expect(tables.allSatisfy(FrequencyMath.isFrequencyLadder))
+        // The fastest CPU ladder on any Mac sits well under 7 GHz.
+        #expect(tables.first?.max().map { $0 < 7e9 } ?? true)
+    }
+}

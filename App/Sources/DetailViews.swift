@@ -193,7 +193,10 @@ struct PerformanceView: View {
         let topology = metrics.cpuTopology
         return [
             .init(label: "Total Usage", value: metrics.cpu.map { Format.percent($0.totalPercent) }),
-            .init(label: "Max Frequency", value: topology.maxFrequencyHz.map(Format.frequency)),
+            .init(label: "Current Frequency", value: metrics.frequency?.cpuCurrentHz.map(Format.frequency)),
+            // Apple Silicon reports a ceiling through IOReport; Intel publishes one through sysctl.
+            .init(label: "Max Frequency",
+                  value: (metrics.frequency?.cpuMaxHz ?? topology.maxFrequencyHz).map(Format.frequency)),
         ]
         // One row per cluster, labelled the way the kernel names it (e.g. "Super", "Performance").
         + topology.clusters.map { .init(label: "Cores (\($0.name))", value: "\($0.logicalCount)") }
@@ -232,6 +235,7 @@ struct PerformanceView: View {
             .init(label: "Total Usage", value: gpu.map { Format.percent($0.utilizationPercent) }),
             .init(label: "Renderer", value: gpu?.rendererPercent.map(Format.percent)),
             .init(label: "Memory In Use", value: gpu?.memoryInUseBytes.map(Format.memory)),
+            .init(label: "Power", value: metrics.frequency?.gpuPowerWatts.map(Format.watts)),
         ]
     }
 

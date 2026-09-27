@@ -15,6 +15,7 @@ public struct Snapshot: Sendable {
     public var gpu: GPUReading?
     public var sensors: SensorsReading?
     public var loadAverage: LoadAverage?
+    public var frequency: FrequencyReading?
     public var peripheralBatteries: [PeripheralBattery]?
 }
 
@@ -29,6 +30,8 @@ actor Sampler {
     private let thermal = ThermalCollector()
     private var processes = ProcessCollector()
     private let sensors = SensorsCollector()
+    /// Created on demand while the Performance page is visible, released when it goes away (ADR 0003).
+    private var ioReport: IOReportClient?
     private var loop: Task<Void, Never>?
     private let recorder: HistoryRecorder?
 
@@ -65,9 +68,11 @@ actor Sampler {
         cadence.sensorsVisible = visible
     }
 
-    /// Performance page visibility: speeds up the GPU job (and, with `IOReportClient`, frequency).
+    /// Performance page visibility: speeds up the GPU job and owns the IOReport subscription,
+    /// so a menu-bar-only session never pays for frequency or GPU power it does not display.
     func setPerformanceVisible(_ visible: Bool) {
         cadence.performanceVisible = visible
+        ioReport = visible ? IOReportClient() : nil
     }
 
     func setSensorsInMenuBar(_ value: Bool) {
@@ -108,6 +113,7 @@ actor Sampler {
         }
         if due.contains(.gpu) {
             s.gpu = GPUCollector.sample()
+            s.frequency = ioReport?.sample(now: now)
         }
         if due.contains(.disk) {
             s.disk = disk.sample()

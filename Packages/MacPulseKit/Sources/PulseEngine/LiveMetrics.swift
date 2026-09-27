@@ -24,6 +24,9 @@ public final class LiveMetrics {
     public private(set) var peripheralBatteries: [PeripheralBattery] = []
     public private(set) var developer = DeveloperSnapshot()
     public private(set) var loadAverage: LoadAverage?
+    /// CPU frequency and GPU power (private APIs, ADR 0003). Nil unless the Performance page is
+    /// visible, and individually nil for anything this Mac does not report.
+    public private(set) var frequency: FrequencyReading?
     public let processorName: String?
     /// Fixed for the life of the process; `performanceCores`/`efficiencyCores` are nil on Intel.
     public let cpuTopology: CPUTopology
@@ -204,7 +207,11 @@ public final class LiveMetrics {
     public func performanceDisappeared() {
         guard performanceViewers > 0 else { return }
         performanceViewers -= 1
-        if performanceViewers == 0 { let sampler = self.sampler; Task { await sampler.setPerformanceVisible(false) } }
+        if performanceViewers == 0 {
+            frequency = nil                     // stale once the subscription is released
+            let sampler = self.sampler
+            Task { await sampler.setPerformanceVisible(false) }
+        }
     }
 
     /// Seconds between GPU samples right now — charts need their own series' spacing, not `samplingInterval`.
@@ -362,6 +369,7 @@ public final class LiveMetrics {
             memoryCachedHistory.append(Double(v.cachedFilesBytes) / total * 100)
         }
         if let v = s.loadAverage { loadAverage = v; loadHistory.append(v.oneMinute) }
+        if let v = s.frequency { frequency = v }
         if let v = s.network {
             network = v
             downHistory.append(v.downBytesPerSec)

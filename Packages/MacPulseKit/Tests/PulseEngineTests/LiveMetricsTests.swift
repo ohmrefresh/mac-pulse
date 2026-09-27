@@ -18,6 +18,41 @@ import PulseCollectors
         #expect(m.thermalChanges.count == 50)
     }
 
+    /// The Performance page owns the fast GPU tick and the IOReport subscription, so the gate has
+    /// to survive two views showing the page at once and release on the last one.
+    @Test func performanceGateIsReferenceCounted() {
+        let m = LiveMetrics(baseInterval: 1)
+        #expect(m.gpuInterval == 5)
+        m.performanceAppeared()
+        m.performanceAppeared()
+        #expect(m.gpuInterval == 1)
+        m.performanceDisappeared()
+        #expect(m.gpuInterval == 1)       // still one viewer
+        m.performanceDisappeared()
+        #expect(m.gpuInterval == 5)
+        m.performanceDisappeared()        // unbalanced call must not underflow
+        #expect(m.gpuInterval == 5)
+    }
+
+    @Test func perCoreAndMemorySplitHistoriesFollowTheSnapshot() {
+        let m = LiveMetrics()
+        var s = Snapshot()
+        s.cpu = CPUReading(totalPercent: 20, perCorePercent: [10, 30])
+        s.memory = MemoryReading(totalBytes: 100, appBytes: 40, wiredBytes: 10, compressedBytes: 5,
+                                 cachedFilesBytes: 20, swapUsedBytes: 0, pressure: nil)
+        s.loadAverage = LoadAverage(oneMinute: 1.5, fiveMinutes: 1, fifteenMinutes: 0.5)
+        m.apply(s)
+        #expect(m.perCoreHistory.count == 2)
+        #expect(m.perCoreHistory.map(\.values) == [[10], [30]])
+        #expect(m.memoryCachedHistory.values == [20])     // % of installed
+        #expect(m.loadHistory.values == [1.5])
+
+        // A different core count (a fresh reading after a core-count change) rebuilds the series.
+        s.cpu = CPUReading(totalPercent: 5, perCorePercent: [5, 5, 5])
+        m.apply(s)
+        #expect(m.perCoreHistory.count == 3)
+    }
+
     @Test func batteryAndTemperatureHistoriesAndCPUHealth() {
         let m = LiveMetrics()
         var s = Snapshot()
