@@ -119,4 +119,34 @@ import PulseCore
             #expect(!f.observed.isEmpty && !f.recommendation.isEmpty)
         }
     }
+
+    @Test func hotDieWithoutThrottlingIsEarlyWarning() throws {
+        var i = healthyInput()
+        i.cpuTemperaturePeak = 97
+        let f = try #require(DiagnosticRules.evaluate(i).findings.first)
+        #expect(f.title == "CPU running hot" && f.health == .warning)
+        #expect(f.observed.first == "Peak CPU temperature: 97°C")
+        guard case .possibly = f.possibleCause else { Issue.record("expected possibly"); return }
+        var c = DiagnosticsConfig()
+        c.hotCPUCelsius = 100
+        #expect(DiagnosticRules.evaluate(i, config: c).findings.isEmpty)
+    }
+
+    @Test func throttlingFindingIncludesTemperature() throws {
+        var i = healthyInput()
+        i.thermalPeak = .serious
+        i.cpuTemperaturePeak = 101
+        let f = try #require(DiagnosticRules.evaluate(i).findings.first { $0.area == .thermal })
+        #expect(f.title == "Mac is running hot")
+        #expect(f.observed.contains("Peak CPU temperature: 101°C"))
+    }
+
+    @Test func customThresholdsAreHonoured() {
+        var i = healthyInput()
+        i.cpuPeak = 85
+        var c = DiagnosticsConfig()
+        c.cpu = Threshold(warning: 90, critical: 98)
+        #expect(DiagnosticRules.evaluate(i, config: c).findings.isEmpty)
+        #expect(DiagnosticRules.evaluate(i).findings.first?.title == "High CPU usage")
+    }
 }

@@ -35,13 +35,16 @@ extension AlertMetric {
         case .packetLossPercent: "Packet loss"
         case .batteryPercent: "Battery"
         case .thermalState: "Thermal state"
+        case .cpuTemperatureC: "CPU temperature"
+        case .gpuPercent: "GPU"
         }
     }
 
     public func format(_ value: Double) -> String {
         guard value.isFinite else { return "timeout" }
         switch self {
-        case .cpuPercent, .packetLossPercent, .batteryPercent: return "\(Int(value.rounded()))%"
+        case .cpuPercent, .packetLossPercent, .batteryPercent, .gpuPercent: return "\(Int(value.rounded()))%"
+        case .cpuTemperatureC: return "\(Int(value.rounded()))°C"
         case .diskFreeGB: return String(format: "%.1f GB", value)
         case .latencyMs: return "\(Int(value.rounded())) ms"
         case .memoryPressure: return (HealthLevel(rawValue: Int(value)).map { "\($0)".capitalized }) ?? "\(value)"

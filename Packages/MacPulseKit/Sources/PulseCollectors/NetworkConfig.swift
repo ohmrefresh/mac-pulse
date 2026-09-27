@@ -15,6 +15,12 @@ public struct NetworkConfigReading: Sendable, Equatable {
     public var vpnInterfaces: [String]
     public var proxies: [ProxySetting]
     public var vpnActive: Bool { !vpnInterfaces.isEmpty }
+
+    public init(primaryInterface: String?, vpnInterfaces: [String], proxies: [ProxySetting]) {
+        self.primaryInterface = primaryInterface
+        self.vpnInterfaces = vpnInterfaces
+        self.proxies = proxies
+    }
 }
 
 public enum NetworkConfigCollector {

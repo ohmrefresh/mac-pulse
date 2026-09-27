@@ -76,15 +76,26 @@ import PulseCollectors
         #expect(e.first { $0.category == .thermal }?.severity == .warning)
     }
 
-    @Test func connectivityAndVPNTransitions() {
+    @Test func connectivityAndInterfaceTransitions() {
         var g = TimelineGenerator()
         #expect(g.observe(online(10), interface: "en0", at: at(0)).isEmpty)
-        let vpn = g.observe(online(10), interface: "utun4", at: at(5))
-        #expect(vpn.map(\.title) == ["VPN connected"])
-        #expect(vpn.first?.detail == "en0 → utun4")
+        // Moving onto a tunnel is left to the config-based VPN events.
+        #expect(g.observe(online(10), interface: "utun4", at: at(5)).isEmpty)
         let offline = NetworkHealthReading.make(connectivity: .offline, gateway: nil, internet: nil, thresholds: NetworkThresholds())
         #expect(g.observe(offline, interface: nil, at: at(10)).map(\.title) == ["Offline"])
-        #expect(g.observe(online(10), interface: "en0", at: at(15)).map(\.title) == ["Back online", "VPN disconnected"])
+        #expect(g.observe(online(10), interface: "en0", at: at(15)).map(\.title) == ["Back online"])
+        let wifi = g.observe(online(10), interface: "en7", at: at(20))
+        #expect(wifi.map(\.title) == ["Network changed"] && wifi.first?.detail == "en0 → en7")
+    }
+
+    @Test func vpnEventsFromConfigIncludingSplitTunnel() {
+        var g = TimelineGenerator()
+        func config(_ vpn: [String]) -> NetworkConfigReading { NetworkConfigReading(primaryInterface: "en0", vpnInterfaces: vpn, proxies: []) }
+        #expect(g.observe(config: config([]), at: at(0)).isEmpty)                 // baseline
+        let up = g.observe(config: config(["utun6"]), at: at(5))                  // primary unchanged: split tunnel
+        #expect(up.map(\.title) == ["VPN connected"] && up.first?.detail == "utun6")
+        #expect(g.observe(config: config(["utun6"]), at: at(10)).isEmpty)
+        #expect(g.observe(config: config([]), at: at(15)).map(\.title) == ["VPN disconnected"])
     }
 
     @Test func networkDegradationDebounced() {

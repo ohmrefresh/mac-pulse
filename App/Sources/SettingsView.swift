@@ -12,6 +12,7 @@ struct SettingsView: View {
             general.tabItem { Label("General", systemImage: "gearshape") }
             menuBar.tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
             network.tabItem { Label("Network", systemImage: "network") }
+            health.tabItem { Label("Health", systemImage: "stethoscope") }
             data.tabItem { Label("Data", systemImage: "externaldrive") }
         }
         .frame(width: 460)
@@ -59,6 +60,23 @@ struct SettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text("Probes run every 5 seconds against the gateway and the ping host.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var health: some View {
+        Form {
+            Section("CPU health (timeline and diagnostics)") {
+                LabeledContent("Warning at") { stepper($settings.cpuWarningPercent, unit: "%", step: 5, range: 10...100) }
+                LabeledContent("Critical at") { stepper($settings.cpuCriticalPercent, unit: "%", step: 5, range: 10...100) }
+            }
+            Section("Diagnostics") {
+                LabeledContent("Slow gateway") { stepper($settings.gatewayLatencyMs, unit: "ms", step: 10, range: 10...2000) }
+                LabeledContent("Slow DNS") { stepper($settings.dnsSlowMs, unit: "ms", step: 10, range: 20...5000) }
+                LabeledContent("Low disk below") { stepper($settings.lowDiskGB, unit: "GB", step: 5, range: 1...500) }
+                LabeledContent("Hot CPU above") { stepper($settings.hotCPUCelsius, unit: "°C", step: 1, range: 60...110) }
+                Text("Internet latency and packet loss limits are on the Network tab.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -110,6 +128,8 @@ struct SettingsView: View {
         case .latency: "Internet latency"
         case .battery: "Battery"
         case .thermal: "Thermal state"
+        case .temperature: "CPU temperature (°C)"
+        case .gpu: "GPU usage"
         }
     }
 }

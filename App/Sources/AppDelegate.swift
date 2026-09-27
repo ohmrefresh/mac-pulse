@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var dashboardWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Hosting unit tests: don't touch the menu bar, the network or the real history database.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         popover.behavior = .transient
         popover.delegate = self
 
@@ -101,6 +103,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             MainActor.assumeIsolated {
                 self?.metrics.post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Mac went to sleep"))
                 Task { await self?.metrics.flushHistory() }
+            }
+        }
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.metrics.expedite([.disk]) }
             }
         }
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in

@@ -12,8 +12,20 @@ final class AppSettings {
     static let samplingChoices: [TimeInterval] = [1, 2, 5]
 
     var menuBarItems: [MenuBarItem] {
-        didSet { save(menuBarItems.map(\.rawValue), .menuBarItems); onMenuBarChange?() }
+        didSet {
+            save(menuBarItems.map(\.rawValue), .menuBarItems)
+            metrics.setMenuBarShowsTemperature(menuBarItems.contains(.temperature))
+            onMenuBarChange?()
+        }
     }
+
+    // Health thresholds (user-configurable, not hardcoded): CPU Health Level and diagnostics limits.
+    var cpuWarningPercent: Double { didSet { save(cpuWarningPercent, .cpuWarningPercent); pushHealthConfig() } }
+    var cpuCriticalPercent: Double { didSet { save(cpuCriticalPercent, .cpuCriticalPercent); pushHealthConfig() } }
+    var gatewayLatencyMs: Double { didSet { save(gatewayLatencyMs, .gatewayLatencyMs); pushHealthConfig() } }
+    var dnsSlowMs: Double { didSet { save(dnsSlowMs, .dnsSlowMs); pushHealthConfig() } }
+    var lowDiskGB: Double { didSet { save(lowDiskGB, .lowDiskGB); pushHealthConfig() } }
+    var hotCPUCelsius: Double { didSet { save(hotCPUCelsius, .hotCPUCelsius); pushHealthConfig() } }
 
     var samplingInterval: TimeInterval {
         didSet { save(samplingInterval, .samplingInterval); metrics.setSamplingInterval(samplingInterval) }
@@ -90,7 +102,16 @@ final class AppSettings {
         retention = (defaults.object(forKey: Key.retention.rawValue) as? Int).flatMap(RetentionPreset.init(rawValue:)) ?? .thirtyDays
         publicIPEnabled = defaults.bool(forKey: Key.publicIPEnabled.rawValue)
         alertRules = defaults.data(forKey: Key.alertRules.rawValue)
-            .flatMap { try? JSONDecoder().decode([AlertRule].self, from: $0) } ?? AlertRule.templates
+            .flatMap { try? JSONDecoder().decode([AlertRule].self, from: $0) }
+            .map(AlertRule.mergingNewTemplates(into:)) ?? AlertRule.templates
+        let d = DiagnosticsConfig()
+        func double(_ key: Key, _ fallback: Double) -> Double { defaults.object(forKey: key.rawValue) as? Double ?? fallback }
+        cpuWarningPercent = double(.cpuWarningPercent, d.cpu.warning)
+        cpuCriticalPercent = double(.cpuCriticalPercent, d.cpu.critical)
+        gatewayLatencyMs = double(.gatewayLatencyMs, d.gatewayLatencyMs)
+        dnsSlowMs = double(.dnsSlowMs, d.dnsSlowMs)
+        lowDiskGB = double(.lowDiskGB, d.lowDiskBytes / 1e9)
+        hotCPUCelsius = double(.hotCPUCelsius, d.hotCPUCelsius)
     }
 
     /// Push persisted values into the engine at launch (didSet does not run during init).
@@ -98,6 +119,8 @@ final class AppSettings {
         metrics.setSamplingInterval(samplingInterval)
         metrics.setAlertRules(alertRules)
         metrics.setPublicIPEnabled(publicIPEnabled)
+        metrics.setMenuBarShowsTemperature(menuBarItems.contains(.temperature))
+        pushHealthConfig()
         pushNetworkConfig()
         let recorder = metrics.recorder, preset = retention
         Task { await recorder?.setRetention(preset) }
@@ -153,6 +176,13 @@ final class AppSettings {
         metrics.configureNetwork(internetTarget: pingTarget, thresholds: thresholds)
     }
 
+    private func pushHealthConfig() {
+        // Threshold requires warning ≤ critical; clamp rather than crash on mid-edit values.
+        metrics.setCPUThresholds(Threshold(warning: min(cpuWarningPercent, cpuCriticalPercent), critical: cpuCriticalPercent))
+        metrics.setDiagnosticsLimits(gatewayLatencyMs: gatewayLatencyMs, dnsSlowMs: dnsSlowMs,
+                                     lowDiskGB: lowDiskGB, hotCPUCelsius: hotCPUCelsius)
+    }
+
     private func applyActivationPolicy() {
         NSApp.setActivationPolicy(showDockIcon ? .regular : .accessory)
     }
@@ -160,6 +190,7 @@ final class AppSettings {
     private enum Key: String {
         case menuBarItems, samplingInterval, showDockIcon, pingTarget
         case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules, publicIPEnabled
+        case cpuWarningPercent, cpuCriticalPercent, gatewayLatencyMs, dnsSlowMs, lowDiskGB, hotCPUCelsius
         case didOfferLaunchAtLogin
     }
 

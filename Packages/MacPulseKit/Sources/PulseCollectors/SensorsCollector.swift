@@ -28,6 +28,14 @@ public struct SensorsReading: Sendable, Equatable {
     public var fans: [FanReading]
 
     public var isEmpty: Bool { sensors.isEmpty && fans.isEmpty }
+
+    public init(cpuCelsius: Double?, ssdCelsius: Double?, batteryCelsius: Double?, sensors: [TemperatureSensor], fans: [FanReading]) {
+        self.cpuCelsius = cpuCelsius
+        self.ssdCelsius = ssdCelsius
+        self.batteryCelsius = batteryCelsius
+        self.sensors = sensors
+        self.fans = fans
+    }
 }
 
 public final class SensorsCollector: @unchecked Sendable {

@@ -22,13 +22,18 @@ import PulseCollectors
         #expect(MenuBarFormatter.text(MenuBarItem.defaults, MenuBarInputs()) == "CPU -- | MEM -- | ↓-- ↑-- | --")
     }
 
+    @Test func temperatureAndGPUSegments() {
+        #expect(MenuBarFormatter.text([.temperature, .gpu], MenuBarInputs(cpuCelsius: 48.6, gpuPercent: 12.2)) == "49°C | GPU 12%")
+        #expect(MenuBarFormatter.text([.temperature, .gpu], MenuBarInputs()) == "--°C | GPU --")
+    }
+
     @Test func batteryOmittedWithoutBattery() {
         #expect(MenuBarFormatter.text([.cpu, .battery], MenuBarInputs()) == "CPU --")
     }
 
     @Test func widestCoversEveryRenderedSegment() {
         let widest = MenuBarFormatter.widestText(MenuBarItem.allCases)
-        #expect(widest == "CPU 100% | MEM 100% | ↓999M ↑999M | 9999ms | BAT 100% | Critical")
+        #expect(widest == "CPU 100% | MEM 100% | ↓999M ↑999M | 9999ms | BAT 100% | Critical | 100°C | GPU 100%")
         #expect("Offline".count <= "9999ms".count + 1)
     }
 

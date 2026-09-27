@@ -51,6 +51,8 @@ public final class LiveMetrics {
     @ObservationIgnored public var onAlert: ((AlertEvent) -> Void)?
     @ObservationIgnored private var alertEngine = AlertEngine()
     @ObservationIgnored private var timeline = TimelineGenerator()
+    @ObservationIgnored private var diagnosticsConfig = DiagnosticsConfig()
+    @ObservationIgnored private var systemEvents: SystemEventSources?
     static let recentEventLimit = 200
 
     @ObservationIgnored private let sampler: Sampler
@@ -72,6 +74,7 @@ public final class LiveMetrics {
         let prober = self.prober
         let recorder = self.recorder
         post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Monitoring started"))
+        systemEvents = SystemEventSources { [weak self] jobs in self?.expedite(jobs) }
         Task { [weak self] in
             await sampler.start { snapshot in self?.apply(snapshot) }
             await prober.start { reading in self?.apply(reading) }
@@ -128,8 +131,12 @@ public final class LiveMetrics {
     }
 
     func apply(_ snapshot: DeveloperSnapshot) {
-        for event in DeveloperMonitor.containerEvents(old: developer.containers, new: snapshot.containers, at: Date()) {
+        let now = Date()
+        for event in DeveloperMonitor.containerEvents(old: developer.containers, new: snapshot.containers, at: now) {
             post(event)
+        }
+        if let config = snapshot.networkConfig {
+            for event in timeline.observe(config: config, at: now) { post(event) }
         }
         if snapshot != developer { developer = snapshot }
     }
@@ -159,7 +166,34 @@ public final class LiveMetrics {
     }
 
     /// Ping target must be an IPv4 address (unprivileged ICMP is IPv4-only here).
+    /// CPU Health Level thresholds, used by the timeline and diagnostics (user-configurable).
+    public func setCPUThresholds(_ threshold: Threshold) {
+        timeline.config.cpu = threshold
+        diagnosticsConfig.cpu = threshold
+    }
+
+    /// User-configurable diagnostics limits. Network latency/loss come from `configureNetwork`.
+    public func setDiagnosticsLimits(gatewayLatencyMs: Double, dnsSlowMs: Double, lowDiskGB: Double, hotCPUCelsius: Double) {
+        diagnosticsConfig.gatewayLatencyMs = gatewayLatencyMs
+        diagnosticsConfig.dnsSlowMs = dnsSlowMs
+        diagnosticsConfig.lowDiskBytes = lowDiskGB * 1e9
+        diagnosticsConfig.hotCPUCelsius = hotCPUCelsius
+    }
+
+    /// Refresh sensors every 15 s while the menu bar shows °C.
+    public func setMenuBarShowsTemperature(_ value: Bool) {
+        let sampler = self.sampler
+        Task { await sampler.setSensorsInMenuBar(value) }
+    }
+
+    /// Samples these jobs on the next tick instead of waiting for their cadence.
+    public func expedite(_ jobs: Set<SamplingJob>) {
+        let sampler = self.sampler
+        Task { await sampler.expedite(jobs) }
+    }
+
     public func configureNetwork(internetTarget: String, thresholds: NetworkThresholds) {
+        diagnosticsConfig.network = thresholds
         let prober = self.prober
         Task { await prober.configure(internetTarget: internetTarget, thresholds: thresholds) }
     }
@@ -173,7 +207,7 @@ public final class LiveMetrics {
 
     public var menuBarInputs: MenuBarInputs {
         MenuBarInputs(cpu: cpu, memory: memory, network: network, networkHealth: networkHealth,
-                      battery: battery, thermal: thermal)
+                      battery: battery, thermal: thermal, cpuCelsius: sensors?.cpuCelsius, gpuPercent: gpu?.utilizationPercent)
     }
 
     public func topProcesses(byCPU limit: Int) -> [ProcessRow] {
@@ -194,7 +228,7 @@ public final class LiveMetrics {
             diskFreeBytes: disk.map { Double($0.availableBytes) },
             primaryTarget: networkHealth?.internet?.address ?? "1.1.1.1",
             cpuFallback: cpuHistory.values)
-        return await DiagnosticsRunner.run(history: history, live: live)
+        return await DiagnosticsRunner.run(history: history, live: live, config: diagnosticsConfig)
     }
 
     /// Adds an event to the live list and the persistent timeline.
@@ -273,6 +307,8 @@ public final class LiveMetrics {
         if let d = s.disk { values.append((.diskFreeGB, Double(d.availableBytes) / 1e9)) }
         if let b = s.battery { values.append((.batteryPercent, b.percent)) }
         if let t = s.thermal { values.append((.thermalState, Double(t.rawValue))) }
+        if let c = s.sensors?.cpuCelsius { values.append((.cpuTemperatureC, c)) }
+        if let g = s.gpu { values.append((.gpuPercent, g.utilizationPercent)) }
         return values
     }
 }

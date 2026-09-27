@@ -92,7 +92,7 @@ import PulseCore
 
     @Test func templatesMatchPRD() throws {
         let byName = Dictionary(uniqueKeysWithValues: AlertRule.templates.map { ($0.name, $0) })
-        #expect(byName.count == 6)
+        #expect(byName.count == 8)             // PRD §12's six plus Hot CPU and High GPU (Phase 4)
         func check(_ name: String, _ comparator: AlertComparator, _ threshold: Double, _ duration: TimeInterval) throws {
             let r = try #require(byName[name])
             #expect(r.comparator == comparator && r.threshold == threshold && r.duration == duration, "\(name)")
@@ -103,6 +103,19 @@ import PulseCore
         try check("Packet Loss", .above, 10, 0)
         try check("Low Disk", .below, 10, 0)
         try check("Thermal Warning", .atLeast, 2, 0)
+        try check("Hot CPU", .above, 95, 60)
+        try check("High GPU", .above, 90, 60)
         #expect(AlertRule.templates.allSatisfy { !$0.isEnabled })
+    }
+
+    @Test func mergingAddsOnlyMissingTemplatesKeepingEdits() {
+        var saved = Array(AlertRule.templates.prefix(6))
+        saved[0].threshold = 70
+        saved[0].isEnabled = true
+        let merged = AlertRule.mergingNewTemplates(into: saved)
+        #expect(merged.count == 8)
+        #expect(merged[0].threshold == 70 && merged[0].isEnabled)
+        #expect(merged.suffix(2).map(\.name) == ["Hot CPU", "High GPU"])
+        #expect(AlertRule.mergingNewTemplates(into: merged) == merged)
     }
 }

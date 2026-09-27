@@ -7,6 +7,7 @@ struct AlertsView: View {
     let metrics: LiveMetrics
     @Bindable var settings: AppSettings
     let notifier: AlertNotifier
+    @State private var stored: [TimelineEvent] = []
 
     var body: some View {
         Form {
@@ -22,18 +23,33 @@ struct AlertsView: View {
                     RuleRow(rule: $rule, isFiring: metrics.firingAlertIDs.contains(rule.id))
                 }
             }
-            Section("Recent alerts") {
-                let recent = metrics.recentEvents.filter { $0.category == .alert }.suffix(20).reversed()
-                if recent.isEmpty {
-                    Text("No alerts since launch.").foregroundStyle(.secondary)
+            Section("Recent alerts (7 days)") {
+                if recentAlerts.isEmpty {
+                    Text("No alerts in the last 7 days.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(recent)) { EventRow(event: $0) }
+                    ForEach(recentAlerts) { EventRow(event: $0) }
                 }
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Alerts")
         .task { await notifier.refreshAuthorization() }
+        .task { await loadStored() }
+    }
+
+    /// Stored alert events plus live ones not yet flushed, newest first.
+    private var recentAlerts: [TimelineEvent] {
+        let storedIDs = Set(stored.map(\.id))
+        let live = metrics.recentEvents.filter { $0.category == .alert && !storedIDs.contains($0.id) }
+        return Array((live + stored).sorted { $0.time > $1.time }.prefix(50))
+    }
+
+    private func loadStored() async {
+        guard let history = metrics.history else { return }
+        let from = Date().addingTimeInterval(-7 * 86_400)
+        stored = (try? await Task.detached {
+            try history.events(from: from, to: Date(), categories: [.alert], limit: 50)
+        }.value) ?? []
     }
 }
 
@@ -102,7 +118,8 @@ private struct RuleRow: View {
 
     private var unit: String {
         switch rule.metric {
-        case .cpuPercent, .packetLossPercent, .batteryPercent: "%"
+        case .cpuPercent, .packetLossPercent, .batteryPercent, .gpuPercent: "%"
+        case .cpuTemperatureC: "°C"
         case .diskFreeGB: "GB"
         case .latencyMs: "ms"
         case .memoryPressure, .thermalState: ""

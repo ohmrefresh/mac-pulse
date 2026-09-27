@@ -130,6 +130,7 @@ import PulseCore
         try store.write(samples: [], processes: [], events: [a, b], now: at(3), retention: .thirtyDays)
         #expect(try store.events(from: at(0), to: at(3)) == [b, a])
         #expect(try store.events(from: at(0), to: at(3), limit: 1) == [b])
+        #expect(try store.events(from: at(0), to: at(3), categories: [.alert]) == [a])
         try store.write(samples: [], processes: [], now: at(3_700), retention: .oneHour)
         #expect(try store.events(from: at(0), to: at(3_700)).isEmpty)
     }

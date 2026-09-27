@@ -1,9 +1,12 @@
 import PulseCore
 import PulseCollectors
 
-/// Metrics the user can show in the menu bar (PRD §14). Temperature is thermal state in v1.0.
+/// Metrics the user can show in the menu bar (PRD §14).
 public enum MenuBarItem: String, CaseIterable, Codable, Sendable {
     case cpu, memory, network, latency, battery, thermal
+    /// CPU °C (private sensors, ADR 0002).
+    case temperature
+    case gpu
 
     public static let defaults: [MenuBarItem] = [.cpu, .memory, .network, .latency]
 }
@@ -15,15 +18,20 @@ public struct MenuBarInputs: Sendable {
     public var networkHealth: NetworkHealthReading?
     public var battery: BatteryReading?
     public var thermal: ThermalState?
+    public var cpuCelsius: Double?
+    public var gpuPercent: Double?
 
     public init(cpu: CPUReading? = nil, memory: MemoryReading? = nil, network: NetworkReading? = nil,
-                networkHealth: NetworkHealthReading? = nil, battery: BatteryReading? = nil, thermal: ThermalState? = nil) {
+                networkHealth: NetworkHealthReading? = nil, battery: BatteryReading? = nil, thermal: ThermalState? = nil,
+                cpuCelsius: Double? = nil, gpuPercent: Double? = nil) {
         self.cpu = cpu
         self.memory = memory
         self.network = network
         self.networkHealth = networkHealth
         self.battery = battery
         self.thermal = thermal
+        self.cpuCelsius = cpuCelsius
+        self.gpuPercent = gpuPercent
     }
 }
 
@@ -44,6 +52,8 @@ public enum MenuBarFormatter {
             case .latency: "9999ms"
             case .battery: "BAT 100%"
             case .thermal: "Critical"
+            case .temperature: "100°C"
+            case .gpu: "GPU 100%"
             }
         }.joined(separator: " | ")
     }
@@ -56,6 +66,8 @@ public enum MenuBarFormatter {
         case .latency: latency(i.networkHealth)
         case .battery: i.battery.map { "BAT " + percent($0.percent) }
         case .thermal: i.thermal.map(thermalName) ?? "--"
+        case .temperature: i.cpuCelsius.map { "\(Int($0.rounded()))°C" } ?? "--°C"
+        case .gpu: "GPU " + (i.gpuPercent.map(percent) ?? "--")
         }
     }
 

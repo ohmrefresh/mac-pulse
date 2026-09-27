@@ -15,7 +15,8 @@ enum DiagnosticsRunner {
         var cpuFallback: [Double]      // used only when history is unavailable
     }
 
-    static func run(history: HistoryStore?, live: Live, now: Date = Date()) async -> DiagnosticReport {
+    static func run(history: HistoryStore?, live: Live, config: DiagnosticsConfig = DiagnosticsConfig(),
+                    now: Date = Date()) async -> DiagnosticReport {
         var input = DiagnosticInput(from: now.addingTimeInterval(-window), to: now)
         input.memoryUsedPercent = live.memoryUsedPercent
         input.diskFreeBytes = live.diskFreeBytes
@@ -33,7 +34,7 @@ enum DiagnosticsRunner {
 
         guard NetworkCollector.primaryInterface() != nil else {
             input.connectivity = .offline
-            return DiagnosticRules.evaluate(input)
+            return DiagnosticRules.evaluate(input, config: config)
         }
         input.connectivity = .online
         let gateway = NetworkCollector.gatewayAddress()
@@ -47,7 +48,7 @@ enum DiagnosticsRunner {
         input.gateway = gw
         input.internet = [primary, second]
         input.dns = resolver.map { ($0, dnsMs) }
-        return DiagnosticRules.evaluate(input)
+        return DiagnosticRules.evaluate(input, config: config)
     }
 
     /// `burstCount` pings 100 ms apart: average of replies, loss over all.
@@ -68,6 +69,7 @@ struct HistoryFacts: Sendable {
     var pressure: [HistoryPoint] = []
     var swap: [HistoryPoint] = []
     var thermal: [HistoryPoint] = []
+    var cpuTemperature: [HistoryPoint] = []
     var processes: [ProcessSample] = []
 
     static func load(_ store: HistoryStore, from: Date, to: Date) throws -> HistoryFacts {
@@ -75,6 +77,7 @@ struct HistoryFacts: Sendable {
                      pressure: try store.series(.memoryPressure, from: from, to: to, now: to),
                      swap: try store.series(.swapUsedBytes, from: from, to: to, now: to),
                      thermal: try store.series(.thermalState, from: from, to: to, now: to),
+                     cpuTemperature: try store.series(.cpuTemperatureC, from: from, to: to, now: to),
                      processes: try store.processSamples(from: from, to: to))
     }
 
@@ -89,6 +92,7 @@ struct HistoryFacts: Sendable {
             i.swapGrowthBytes = last.avg - first.avg
         }
         i.thermalPeak = thermal.map(\.max).max().flatMap { ThermalState(rawValue: Int($0)) }
+        i.cpuTemperaturePeak = cpuTemperature.map(\.max).max()
         i.topProcesses = Self.averageCPU(processes)
     }
 

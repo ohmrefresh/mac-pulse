@@ -17,6 +17,8 @@ targets:
     type: application
     platform: macOS
     sources: [App/Sources]
+    scheme:
+      testTargets: [MacPulseTests]
     dependencies:
       - package: MacPulseKit
         product: PulseEngine
@@ -35,3 +37,18 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
         GENERATE_INFOPLIST_FILE: NO
+  MacPulseTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [App/Tests]
+    dependencies:
+      - target: MacPulse
+      - package: MacPulseKit
+        product: PulseEngine
+      - package: MacPulseKit
+        product: PulseStore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.ohmrefresh.macpulse.tests
+        CODE_SIGN_IDENTITY: "-"

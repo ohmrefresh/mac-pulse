@@ -59,6 +59,8 @@ public struct DiagnosticInput: Sendable, Equatable {
     public var swapGrowthBytes: Double?
     public var swapUsedBytes: Double?
     public var thermalPeak: ThermalState?
+    /// Hottest CPU die in the window (private sensors, ADR 0002); nil when unavailable.
+    public var cpuTemperaturePeak: Double?
     public var diskFreeBytes: Double?
     public var connectivity: Connectivity?
     public var gateway: Probe?
@@ -77,7 +79,7 @@ public struct DiagnosticInput: Sendable, Equatable {
             && a.topProcesses.map(\.name) == b.topProcesses.map(\.name) && a.topProcesses.map(\.cpu) == b.topProcesses.map(\.cpu)
             && a.memoryPressurePeak == b.memoryPressurePeak && a.memoryUsedPercent == b.memoryUsedPercent
             && a.swapGrowthBytes == b.swapGrowthBytes && a.swapUsedBytes == b.swapUsedBytes
-            && a.thermalPeak == b.thermalPeak && a.diskFreeBytes == b.diskFreeBytes && a.connectivity == b.connectivity
+            && a.thermalPeak == b.thermalPeak && a.cpuTemperaturePeak == b.cpuTemperaturePeak && a.diskFreeBytes == b.diskFreeBytes && a.connectivity == b.connectivity
             && a.gateway == b.gateway && a.internet == b.internet && a.dns?.server == b.dns?.server && a.dns?.ms == b.dns?.ms
     }
 }
@@ -89,6 +91,8 @@ public struct DiagnosticsConfig: Sendable {
     public var dnsSlowMs: Double = 200
     public var swapGrowthBytes: Double = 256 * 1_048_576
     public var lowDiskBytes: Double = 10e9
+    /// CPU die temperature treated as hot even while macOS still reports a normal thermal state.
+    public var hotCPUCelsius: Double = 95
     public init() {}
 }
 
@@ -179,8 +183,17 @@ public enum DiagnosticRules {
     }
 
     static func thermal(_ i: DiagnosticInput, _ c: DiagnosticsConfig) -> [Finding] {
-        guard let t = i.thermalPeak, t.health >= .warning else { return [] }
+        let temperature = i.cpuTemperaturePeak.map { "Peak CPU temperature: \(Int($0.rounded()))°C" }
+        guard let t = i.thermalPeak, t.health >= .warning else {
+            // Hot die without throttling yet: an early warning, hedged accordingly.
+            guard let peak = i.cpuTemperaturePeak, peak >= c.hotCPUCelsius else { return [] }
+            return [Finding(area: .thermal, health: .warning, title: "CPU running hot", observed: [temperature!]
+                                + (i.cpuPeak.map { ["Peak CPU: \(pct($0))"] } ?? []),
+                            possibleCause: .possibly("sustained load or restricted airflow; macOS has not started throttling yet"),
+                            recommendation: "Keep vents clear and watch for slowdowns if the load continues.")]
+        }
         var observed = ["Thermal state reached \(t == .critical ? "Critical" : "Serious")"]
+        if let temperature { observed.append(temperature) }
         if let peak = i.cpuPeak { observed.append("Peak CPU: \(pct(peak))") }
         let busy = (i.cpuPeak ?? 0) >= c.cpu.warning
         return [Finding(area: .thermal, health: t.health, title: "Mac is running hot", observed: observed,

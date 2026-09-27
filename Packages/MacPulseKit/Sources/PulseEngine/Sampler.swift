@@ -64,6 +64,14 @@ actor Sampler {
         cadence.sensorsVisible = visible
     }
 
+    func setSensorsInMenuBar(_ value: Bool) {
+        cadence.sensorsInMenuBar = value
+    }
+
+    func expedite(_ jobs: Set<SamplingJob>) {
+        for job in jobs { cadence.expedite(job) }
+    }
+
     /// Takes effect from the next sleep; the loop re-reads the interval every iteration.
     func setBaseInterval(_ interval: TimeInterval) {
         cadence.baseInterval = interval

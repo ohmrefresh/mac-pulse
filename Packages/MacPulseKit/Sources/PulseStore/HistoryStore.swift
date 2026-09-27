@@ -238,11 +238,14 @@ public final class HistoryStore: Sendable {
     }
 
     /// Timeline events in a range, newest first.
-    public func events(from: Date, to: Date, limit: Int = 500) throws -> [TimelineEvent] {
-        try db.read { db in
+    public func events(from: Date, to: Date, categories: Set<TimelineCategory>? = nil, limit: Int = 500) throws -> [TimelineEvent] {
+        let filter = categories.map { set in
+            " AND category IN (" + set.map { "'\($0.rawValue)'" }.sorted().joined(separator: ",") + ")"
+        } ?? ""
+        return try db.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, ts, category, severity, title, detail FROM timeline_events
-                WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?
+                WHERE ts >= ? AND ts <= ?\(filter) ORDER BY ts DESC LIMIT ?
                 """, arguments: [from.timeIntervalSince1970, to.timeIntervalSince1970, limit]).compactMap { row in
                 guard let id = UUID(uuidString: row["id"]),
                       let category = TimelineCategory(rawValue: row["category"]),

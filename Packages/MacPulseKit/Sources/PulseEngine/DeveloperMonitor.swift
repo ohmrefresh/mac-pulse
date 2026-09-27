@@ -32,7 +32,6 @@ actor DeveloperMonitor {
     private var snapshot = DeveloperSnapshot()
     private var tracker = DockerStatsTracker()
     private var lastContainers: Date = .distantPast
-    private var lastConfig: Date = .distantPast
     private var lastPublicIP: Date = .distantPast
     private var lastNetworkKey: String?
     private var loop: Task<Void, Never>?
@@ -56,7 +55,7 @@ actor DeveloperMonitor {
 
     func setVisible(_ value: Bool) {
         visible = value
-        if value { lastContainers = .distantPast; lastConfig = .distantPast }   // refresh immediately
+        if value { lastContainers = .distantPast }   // refresh immediately
         if !value { snapshot.ports = nil }
     }
 
@@ -68,19 +67,29 @@ actor DeveloperMonitor {
     private func refresh(now: Date) async -> DeveloperSnapshot {
         if visible || now.timeIntervalSince(lastContainers) >= Self.backgroundInterval {
             lastContainers = now
-            if let socket = DockerClient.socketPath(), let list = DockerClient.containers(socket: socket) {
-                snapshot.containers = visible ? tracker.annotate(list, socket: socket) : list
+            // Socket and subprocess I/O can block for seconds if Docker hangs: keep it off the actor.
+            if let socket = DockerClient.socketPath(), let list = await offload({ DockerClient.containers(socket: socket) }) {
+                if visible {
+                    let current = self.tracker
+                    let (annotated, updated) = await offload { () -> ([DockerContainer], DockerStatsTracker) in
+                        var tracker = current
+                        let result = tracker.annotate(list, socket: socket)
+                        return (result, tracker)
+                    }
+                    self.tracker = updated
+                    snapshot.containers = annotated
+                } else {
+                    snapshot.containers = list
+                }
             } else {
                 snapshot.containers = nil
             }
         }
         if visible {
-            snapshot.ports = ListeningPortsCollector.sample()
+            snapshot.ports = await offload { ListeningPortsCollector.sample() }
         }
-        if visible || now.timeIntervalSince(lastConfig) >= Self.backgroundInterval {
-            lastConfig = now
-            snapshot.networkConfig = NetworkConfigCollector.sample()
-        }
+        // Cheap (~0.3 ms) and drives VPN timeline events, so every tick.
+        snapshot.networkConfig = NetworkConfigCollector.sample()
         if publicIPEnabled, let config = snapshot.networkConfig {
             let key = "\(config.primaryInterface ?? "-")|\(config.vpnInterfaces.joined(separator: ","))"
             if key != lastNetworkKey || now.timeIntervalSince(lastPublicIP) >= Self.publicIPInterval {
@@ -90,6 +99,12 @@ actor DeveloperMonitor {
             }
         }
         return snapshot
+    }
+
+    private func offload<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async { continuation.resume(returning: work()) }
+        }
     }
 
     /// Timeline events for containers that started or stopped between two lists.

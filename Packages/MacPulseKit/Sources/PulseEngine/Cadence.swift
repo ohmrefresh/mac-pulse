@@ -19,6 +19,8 @@ public struct Cadence: Sendable {
     public var baseInterval: TimeInterval
     public var processesVisible = false
     public var sensorsVisible = false
+    /// Menu bar shows °C: refresh often enough to be meaningful, cheaply enough for the idle budget.
+    public var sensorsInMenuBar = false
     private var lastRun: [SamplingJob: TimeInterval] = [:]
 
     public init(baseInterval: TimeInterval = 1) {
@@ -32,8 +34,13 @@ public struct Cadence: Sendable {
         case .disk: 60
         case .processes: processesVisible ? baseInterval : 5
         case .privilegedProcesses: 5
-        case .sensors: sensorsVisible ? 5 : 60
+        case .sensors: sensorsVisible ? 5 : (sensorsInMenuBar ? 15 : 60)
         }
+    }
+
+    /// Makes `job` due on the next tick (used when a system notification says its value changed).
+    public mutating func expedite(_ job: SamplingJob) {
+        lastRun[job] = nil
     }
 
     /// Jobs due at `now`; marks them as run. Half a base interval of slack absorbs timer jitter.

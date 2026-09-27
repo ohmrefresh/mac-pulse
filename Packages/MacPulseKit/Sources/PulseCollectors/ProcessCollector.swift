@@ -10,15 +10,21 @@ public struct ProcessRow: Sendable, Equatable, Identifiable {
     public var memoryBytes: UInt64
     /// Owned by root or another system account; refreshed only on the slower `ps` cadence.
     public var isPrivileged: Bool
+    /// Owning user's short name (PRD §8), when resolvable.
+    public var user: String?
+    public var startTime: Date?
 
     public var id: Int32 { pid }
 
-    public init(pid: Int32, name: String, cpuPercent: Double, memoryBytes: UInt64, isPrivileged: Bool) {
+    public init(pid: Int32, name: String, cpuPercent: Double, memoryBytes: UInt64, isPrivileged: Bool,
+                user: String? = nil, startTime: Date? = nil) {
         self.pid = pid
         self.name = name
         self.cpuPercent = cpuPercent
         self.memoryBytes = memoryBytes
         self.isPrivileged = isPrivileged
+        self.user = user
+        self.startTime = startTime
     }
 }
 
@@ -43,7 +49,9 @@ struct CPUTimeTracker<Identity: Hashable & Sendable>: Sendable {
 public struct ProcessCollector: Sendable {
     private var directTracker = CPUTimeTracker<UInt64>()
     private var privilegedTracker = CPUTimeTracker<String>()
-    private var names: [Int32: (startTime: UInt64, name: String)] = [:]
+    /// Per-PID static details, keyed by kernel start time so a reused PID is re-read.
+    private var details: [Int32: (key: UInt64, name: String, user: String?, started: Date?)] = [:]
+    private var userNames: [UInt32: String] = [:]
     private var privilegedRows: [Int32: ProcessRow] = [:]
 
     public init() {}
@@ -59,20 +67,25 @@ public struct ProcessCollector: Sendable {
         for pid in pids {
             guard let usage = Self.rusage(pid) else { continue }
             readable.insert(pid)
-            let name = cachedName(pid: pid, startTime: usage.startTime)
+            let info = cachedDetails(pid: pid, key: usage.startTime)
             let percent = directTracker.percent(pid: pid, identity: usage.startTime, cpuNanos: usage.cpuNanos, at: now) ?? 0
-            rows.append(ProcessRow(pid: pid, name: name, cpuPercent: percent, memoryBytes: usage.footprint, isPrivileged: false))
+            rows.append(ProcessRow(pid: pid, name: info.name, cpuPercent: percent, memoryBytes: usage.footprint,
+                                   isPrivileged: false, user: info.user, startTime: info.started))
         }
         directTracker.forgetAll(except: readable)
-        names = names.filter { readable.contains($0.key) }
+        details = details.filter { readable.contains($0.key) }
 
         let unreadable = pids.filter { !readable.contains($0) }
         if refreshPrivileged, !unreadable.isEmpty, let output = Self.runPS(pids: unreadable) {
             var fresh: [Int32: ProcessRow] = [:]
+            let wallNow = Date()
             for entry in PSParser.parse(output) where !readable.contains(entry.pid) {
                 let percent = privilegedTracker.percent(pid: entry.pid, identity: entry.name, cpuNanos: entry.cpuNanos, at: now) ?? 0
+                // Elapsed time is rounded to seconds by ps; round the derived start to match.
+                let started = entry.elapsedNanos.map { Date(timeIntervalSince1970: (wallNow.timeIntervalSince1970 - Double($0) / 1e9).rounded()) }
                 fresh[entry.pid] = ProcessRow(pid: entry.pid, name: entry.name, cpuPercent: percent,
-                                              memoryBytes: entry.residentBytes, isPrivileged: true)
+                                              memoryBytes: entry.residentBytes, isPrivileged: true,
+                                              user: userName(entry.uid), startTime: started)
             }
             privilegedTracker.forgetAll(except: Set(fresh.keys))
             privilegedRows = fresh
@@ -82,10 +95,22 @@ public struct ProcessCollector: Sendable {
         return rows
     }
 
-    private mutating func cachedName(pid: Int32, startTime: UInt64) -> String {
-        if let cached = names[pid], cached.startTime == startTime { return cached.name }
+    private mutating func cachedDetails(pid: Int32, key: UInt64) -> (name: String, user: String?, started: Date?) {
+        if let cached = details[pid], cached.key == key { return (cached.name, cached.user, cached.started) }
+        var info = proc_bsdinfo()
+        let hasInfo = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size)) > 0
+        let user = hasInfo ? userName(info.pbi_uid) : nil
+        let started = hasInfo ? Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1e6) : nil
         let name = Self.name(of: pid)
-        names[pid] = (startTime, name)
+        details[pid] = (key, name, user, started)
+        return (name, user, started)
+    }
+
+    private mutating func userName(_ uid: UInt32?) -> String? {
+        guard let uid else { return nil }
+        if let cached = userNames[uid] { return cached }
+        let name = getpwuid(uid).flatMap { String(validatingCString: $0.pointee.pw_name) } ?? String(uid)
+        userNames[uid] = name
         return name
     }
 
@@ -134,7 +159,7 @@ public struct ProcessCollector: Sendable {
     static func runPS(pids: [Int32]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-c", "-o", "pid=,time=,rss=,comm=", "-p", pids.map(String.init).joined(separator: ",")]
+        process.arguments = ["-c", "-o", "pid=,uid=,etime=,time=,rss=,comm=", "-p", pids.map(String.init).joined(separator: ",")]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -149,21 +174,25 @@ public struct ProcessCollector: Sendable {
 
 struct PSEntry: Equatable {
     var pid: Int32
+    var uid: UInt32?
+    /// Wall time since the process started.
+    var elapsedNanos: UInt64?
     var cpuNanos: UInt64
     var residentBytes: UInt64
     var name: String
 }
 
 enum PSParser {
-    /// Parses `ps -o pid=,time=,rss=,comm=` output. `comm` is last because it may contain spaces.
+    /// Parses `ps -o pid=,uid=,etime=,time=,rss=,comm=` output. `comm` is last because it may contain spaces.
     static func parse(_ output: String) -> [PSEntry] {
         output.split(separator: "\n").compactMap { line in
-            let fields = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-            guard fields.count == 4, let pid = Int32(fields[0]), let cpu = cpuNanos(fields[1]),
-                  let rssKB = UInt64(fields[2]) else { return nil }
-            let command = fields[3].trimmingCharacters(in: .whitespaces)
+            let fields = line.split(separator: " ", maxSplits: 5, omittingEmptySubsequences: true)
+            guard fields.count == 6, let pid = Int32(fields[0]), let cpu = cpuNanos(fields[3]),
+                  let rssKB = UInt64(fields[4]) else { return nil }
+            let command = fields[5].trimmingCharacters(in: .whitespaces)
             let name = (command as NSString).lastPathComponent
-            return PSEntry(pid: pid, cpuNanos: cpu, residentBytes: rssKB * 1024, name: name.isEmpty ? command : name)
+            return PSEntry(pid: pid, uid: UInt32(fields[1]), elapsedNanos: cpuNanos(fields[2]), cpuNanos: cpu,
+                           residentBytes: rssKB * 1024, name: name.isEmpty ? command : name)
         }
     }
 

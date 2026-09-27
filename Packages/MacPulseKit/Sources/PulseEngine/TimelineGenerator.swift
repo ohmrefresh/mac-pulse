@@ -34,6 +34,7 @@ public struct TimelineGenerator: Sendable {
     private var onACPower: Bool?
     private var connectivity: Connectivity?
     private var interface: String?
+    private var vpnInterfaces: [String]?
     /// pid → when it first qualified as a CPU hog, and whether it has been announced.
     private var hogs: [Int32: (since: Date, announced: Bool, name: String)] = [:]
     /// pid → recent (time, bytes) samples inside the growth window.
@@ -91,13 +92,10 @@ public struct TimelineGenerator: Sendable {
         connectivity = r.connectivity
 
         if r.connectivity == .online, let newInterface {
-            if let old = interface, old != newInterface {
-                let wasVPN = Self.isVPN(old), isVPN = Self.isVPN(newInterface)
-                let title = isVPN && !wasVPN ? "VPN connected"
-                    : wasVPN && !isVPN ? "VPN disconnected"
-                    : "Network changed"
+            // Moves to/from a tunnel are reported as VPN events by observe(config:) instead.
+            if let old = interface, old != newInterface, !Self.isVPN(old), !Self.isVPN(newInterface) {
                 events.append(TimelineEvent(time: now, category: .connectivity, severity: .healthy,
-                                            title: title, detail: "\(old) → \(newInterface)"))
+                                            title: "Network changed", detail: "\(old) → \(newInterface)"))
             }
             interface = newInterface
             let detail = [r.internet?.latencyMs.map { "latency \(Int($0.rounded())) ms" } ?? "probe timeout",
@@ -105,6 +103,22 @@ public struct TimelineGenerator: Sendable {
             events += debounce(.network, r.health, at: now, title: "Network", detail: detail)
         }
         return events
+    }
+
+    /// VPN up/down from interface configuration, which also catches split-tunnel VPNs that never
+    /// become the primary route.
+    public mutating func observe(config: NetworkConfigReading, at now: Date) -> [TimelineEvent] {
+        defer { vpnInterfaces = config.vpnInterfaces }
+        guard let old = vpnInterfaces else { return [] }          // baseline
+        if old.isEmpty && !config.vpnInterfaces.isEmpty {
+            return [TimelineEvent(time: now, category: .connectivity, severity: .healthy, title: "VPN connected",
+                                  detail: config.vpnInterfaces.joined(separator: ", "))]
+        }
+        if !old.isEmpty && config.vpnInterfaces.isEmpty {
+            return [TimelineEvent(time: now, category: .connectivity, severity: .healthy, title: "VPN disconnected",
+                                  detail: old.joined(separator: ", "))]
+        }
+        return []
     }
 
     // MARK: Helpers

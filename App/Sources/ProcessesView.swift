@@ -30,6 +30,13 @@ struct ProcessesView: View {
                 .width(70)
             TableColumn("Memory", value: \.memoryBytes) { Text(Format.memory($0.memoryBytes)).monospacedDigit() }
                 .width(90)
+            TableColumn("User", value: \.userSortKey) { Text($0.user ?? "–").foregroundStyle(.secondary) }
+                .width(90)
+            TableColumn("Started", value: \.startSortKey) { row in
+                Text(row.startTime.map { $0.formatted(date: Calendar.current.isDateInToday($0) ? .omitted : .abbreviated, time: .shortened) } ?? "–")
+                    .monospacedDigit().foregroundStyle(.secondary)
+            }
+            .width(120)
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
         .navigationTitle("Processes")
@@ -44,6 +51,11 @@ struct ProcessesView: View {
             : metrics.processes.filter { $0.name.localizedCaseInsensitiveContains(search) || String($0.pid) == search }
         return filtered.sorted(using: sortOrder)
     }
+}
+
+private extension ProcessRow {
+    var userSortKey: String { user ?? "" }
+    var startSortKey: Date { startTime ?? .distantPast }
 }
 
 /// App icons for GUI processes, generic executable icon otherwise. Looked up once per PID.

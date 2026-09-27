@@ -49,4 +49,21 @@ import Testing
         #expect(cadence.due(at: 0.95).contains(.fast))
         #expect(!cadence.due(at: 1.2).contains(.fast))
     }
+
+    @Test func menuBarTemperatureRefreshesEvery15Seconds() {
+        var cadence = Cadence(baseInterval: 1)
+        cadence.sensorsInMenuBar = true
+        var n = 0
+        for t in 0...30 where cadence.due(at: Double(t)).contains(.sensors) { n += 1 }
+        #expect(n == 3)                                                   // 0, 15, 30
+    }
+
+    @Test func expediteMakesJobDueNow() {
+        var cadence = Cadence(baseInterval: 1)
+        _ = cadence.due(at: 0)
+        #expect(!cadence.due(at: 1).contains(.disk))
+        cadence.expedite(.disk)
+        #expect(cadence.due(at: 2).contains(.disk))
+        #expect(!cadence.due(at: 3).contains(.disk))                      // back to its 60 s cadence
+    }
 }

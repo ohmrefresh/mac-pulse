@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+
+      - name: Package tests
+        run: swift test --package-path Packages/MacPulseKit
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: App build and tests
+        run: |
+          xcodegen generate
+          xcodebuild -project MacPulse.xcodeproj -scheme MacPulse \
+            -destination "platform=macOS" -derivedDataPath .build/xcode test
+
+      # Timing on shared runners is noisy, so budgets are reported but do not fail the build.
+      - name: Collector benchmarks (informational)
+        continue-on-error: true
+        run: PULSE_BENCH=1 swift test -c release --package-path Packages/MacPulseKit --filter CollectorBenchmarks

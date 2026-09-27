@@ -66,4 +66,24 @@ import PulseCollectors
                       thresholds: NetworkThresholds()))
         #expect(m.recentEvents.last?.detail == "Internet latency timeout · rule > 300 ms")
     }
+
+    @Test func temperatureAndGPUFeedAlerts() {
+        let m = LiveMetrics()
+        var rule = AlertRule.templates.first { $0.name == "Hot CPU" }!
+        rule.isEnabled = true
+        rule.duration = 0
+        m.setAlertRules([rule])
+        var s = Snapshot()
+        s.sensors = SensorsReading(cpuCelsius: 98, ssdCelsius: nil, batteryCelsius: nil, sensors: [], fans: [])
+        m.apply(s)
+        #expect(m.recentEvents.last?.detail == "CPU temperature 98°C · rule > 95°C")
+        #expect(m.menuBarInputs.cpuCelsius == 98)
+    }
+
+    @Test func splitTunnelVPNReachesTimeline() {
+        let m = LiveMetrics()
+        m.apply(DeveloperSnapshot(networkConfig: NetworkConfigReading(primaryInterface: "en0", vpnInterfaces: [], proxies: [])))
+        m.apply(DeveloperSnapshot(networkConfig: NetworkConfigReading(primaryInterface: "en0", vpnInterfaces: ["utun6"], proxies: [])))
+        #expect(m.recentEvents.last?.title == "VPN connected")
+    }
 }

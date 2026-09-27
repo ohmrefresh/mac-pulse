@@ -12,6 +12,9 @@ public enum AlertMetric: String, Codable, Sendable, CaseIterable {
     case batteryPercent
     /// Thermal State raw value: 0 nominal, 1 fair, 2 serious, 3 critical.
     case thermalState
+    /// Hottest CPU die (private sensors, ADR 0002).
+    case cpuTemperatureC
+    case gpuPercent
 }
 
 public enum AlertComparator: String, Codable, Sendable, CaseIterable {
@@ -71,5 +74,15 @@ public struct AlertRule: Codable, Sendable, Equatable, Identifiable {
                   duration: 0, severity: .warning, isEnabled: false),
         AlertRule(name: "Thermal Warning", metric: .thermalState, comparator: .atLeast,
                   threshold: Double(ThermalState.serious.rawValue), duration: 0, severity: .warning, isEnabled: false),
+        AlertRule(name: "Hot CPU", metric: .cpuTemperatureC, comparator: .above, threshold: 95,
+                  duration: 60, severity: .warning, isEnabled: false),
+        AlertRule(name: "High GPU", metric: .gpuPercent, comparator: .above, threshold: 90,
+                  duration: 60, severity: .warning, isEnabled: false),
     ]
+
+    /// Adds templates missing from a saved rule list (e.g. ones introduced after the user saved), by name.
+    public static func mergingNewTemplates(into saved: [AlertRule]) -> [AlertRule] {
+        let names = Set(saved.map(\.name))
+        return saved + templates.filter { !names.contains($0.name) }
+    }
 }
