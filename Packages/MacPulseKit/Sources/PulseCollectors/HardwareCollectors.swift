@@ -2,6 +2,8 @@ import Foundation
 import IOKit
 
 public struct GPUReading: Sendable, Equatable {
+    /// The accelerator's own model name, e.g. "Apple M5 Pro". Nil if the property is missing.
+    public var name: String?
     /// Overall GPU busy %, as Activity Monitor's GPU History shows.
     public var utilizationPercent: Double
     public var rendererPercent: Double?
@@ -20,19 +22,30 @@ public enum GPUCollector {
             defer { IOObjectRelease(service) }
             let stats = IORegistryEntryCreateCFProperty(service, "PerformanceStatistics" as CFString, kCFAllocatorDefault, 0)?
                 .takeRetainedValue() as? [String: Any]
-            if let stats, let reading = parse(stats), reading.utilizationPercent >= (best?.utilizationPercent ?? -1) {
+            if let stats, let reading = parse(stats, name: model(of: service)),
+               reading.utilizationPercent >= (best?.utilizationPercent ?? -1) {
                 best = reading            // multiple GPUs (Intel + discrete): report the busiest
             }
         }
         return best
     }
 
-    static func parse(_ stats: [String: Any]) -> GPUReading? {
+    static func parse(_ stats: [String: Any], name: String? = nil) -> GPUReading? {
         guard let device = (stats["Device Utilization %"] as? NSNumber)?.doubleValue
                 ?? (stats["GPU Activity(%)"] as? NSNumber)?.doubleValue else { return nil }
-        return GPUReading(utilizationPercent: device,
+        return GPUReading(name: name,
+                          utilizationPercent: device,
                           rendererPercent: (stats["Renderer Utilization %"] as? NSNumber)?.doubleValue,
                           memoryInUseBytes: (stats["In use system memory"] as? NSNumber)?.uint64Value)
+    }
+
+    /// IORegistry reports `model` as a NUL-terminated C string in a data blob, sometimes as a string.
+    static func model(of service: io_object_t) -> String? {
+        let property = IORegistryEntrySearchCFProperty(service, kIOServicePlane, "model" as CFString,
+                                                       kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents))
+        if let string = property as? String { return string }
+        guard let data = property as? Data, !data.isEmpty else { return nil }
+        return String(decoding: data.prefix { $0 != 0 }, as: UTF8.self)
     }
 }
 

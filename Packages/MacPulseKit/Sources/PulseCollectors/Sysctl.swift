@@ -9,6 +9,14 @@ enum Sysctl {
         return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
+    /// Reads a sysctl whose value is a C struct (e.g. `kern.boottime` → `timeval`).
+    static func raw<T>(_ name: String, into value: inout T) -> Bool {
+        var size = MemoryLayout<T>.size
+        return withUnsafeMutablePointer(to: &value) {
+            sysctlbyname(name, $0, &size, nil, 0) == 0
+        }
+    }
+
     static func value<T: FixedWidthInteger>(_ name: String) -> T? {
         var value = T.zero
         var size = MemoryLayout<T>.size

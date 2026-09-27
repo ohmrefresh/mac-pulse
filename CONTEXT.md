@@ -24,8 +24,9 @@ macOS's own verdict on battery wear: Normal or Service Recommended. Independent 
 _Avoid_: battery health (for charge level)
 
 **Thermal State**:
-macOS's own four-step thermal scale (Nominal, Fair, Serious, Critical). The only thermal signal in v1.0.
-_Avoid_: temperature (°C readings are a separate, later feature)
+macOS's own four-step thermal scale (Nominal, Fair, Serious, Critical). The only thermal signal that
+drives Health Level.
+_Avoid_: temperature (°C readings are a separate, informational signal)
 
 ## Monitoring
 
@@ -47,7 +48,31 @@ The top 10 processes by CPU and top 10 by memory at a process scan. The only pro
 **Primary Interface**:
 The network interface carrying the default route (e.g. en0). Throughput is measured on it alone.
 
-**Thermal State** and **CPU Temperature** are different signals: the first is macOS's own four-step scale and drives Health Level; the second is a °C reading from private sensors and is informational only.
+**Memory Used**:
+App Memory plus Wired plus Compressed — the same figure Activity Monitor calls "Memory Used". Swap is
+not part of it: swap lives on disk, not in RAM.
+_Avoid_: memory usage (ambiguous), RAM used including cache
+
+**Cached Files**:
+RAM holding file contents the system can reclaim on demand. Not part of Memory Used, and not a shortage.
+_Avoid_: cache, buffers
+
+**Free Memory**:
+Installed RAM minus Memory Used minus Cached Files. Defined as the remainder so that the three always
+add up to the installed total.
+
+**Load Average**:
+The kernel's count of runnable threads averaged over one, five and fifteen minutes. A count, not a
+percentage — it is not capped at 100 and is only comparable to the core count.
+_Avoid_: CPU load (that is CPU %)
+
+**Trend**:
+A metric's current value minus its own average over the last five minutes, shown as the "vs 5m avg"
+delta on a card. Undefined — and therefore not shown — until the metric has been sampled for at least
+two and a half minutes.
+_Avoid_: change, delta (as separate concepts)
+
+**Thermal State** and **CPU Temperature** are different signals: the first is macOS's own four-step scale and drives Health Level; the second is a °C reading from private sensors and is informational only. Both are shown; only Thermal State affects Health Level.
 
 ## Developer
 
@@ -78,6 +103,11 @@ The warmest temperature Sensor at a given moment, named. Informational, like eve
 
 **Fan Speed**:
 Revolutions per minute reported by the SMC; 0 means the fan is stopped, which is normal when cool.
+
+**Core Cluster**:
+A group of CPU cores the kernel names itself — "Performance", "Efficiency", "Super" — and reports a
+count for. The names differ by chip and are read from the machine, never assumed.
+_Avoid_: P-cores / E-cores (as fixed names)
 
 ## Alerts and history
 

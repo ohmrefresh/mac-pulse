@@ -5,6 +5,8 @@ public enum SamplingJob: CaseIterable, Sendable, Hashable {
     case fast
     /// Battery and thermal state.
     case power
+    /// GPU utilization, and (while visible) frequency and GPU power.
+    case gpu
     case disk
     /// Directly readable processes.
     case processes
@@ -19,6 +21,8 @@ public struct Cadence: Sendable {
     public var baseInterval: TimeInterval
     public var processesVisible = false
     public var sensorsVisible = false
+    /// Performance page on screen: the GPU ticks with the other cards instead of every 5 s.
+    public var performanceVisible = false
     /// Menu bar shows °C: refresh often enough to be meaningful, cheaply enough for the idle budget.
     public var sensorsInMenuBar = false
     private var lastRun: [SamplingJob: TimeInterval] = [:]
@@ -31,6 +35,7 @@ public struct Cadence: Sendable {
         switch job {
         case .fast: baseInterval
         case .power: 5
+        case .gpu: performanceVisible ? baseInterval : 5
         case .disk: 60
         case .processes: processesVisible ? baseInterval : 5
         case .privilegedProcesses: 5

@@ -92,3 +92,63 @@ import PulseCore
         #expect(r.availableBytes > 0 && r.availableBytes <= r.totalBytes)
     }
 }
+
+@Suite struct SystemInfoTests {
+    @Test func loadAverageRejectsShortOrImplausibleReads() {
+        #expect(LoadAverage(raw: [1, 2]) == nil)
+        #expect(LoadAverage(raw: [1, -2, 3]) == nil)
+        #expect(LoadAverage(raw: [1, 2, .nan]) == nil)
+        #expect(LoadAverage(raw: [1.5, 2, 3])?.oneMinute == 1.5)
+    }
+
+    @Test func liveLoadAverageIsPlausible() throws {
+        let load = try #require(SystemInfoCollector.loadAverage())
+        // A run queue longer than 512 on a test host means we read garbage, not a busy Mac.
+        #expect(load.oneMinute >= 0 && load.oneMinute < 512)
+        #expect(load.fifteenMinutes >= 0)
+    }
+
+    @Test func liveTopologyMatchesCoreCount() throws {
+        let topology = SystemInfoCollector.topology()
+        let logical = try #require(topology.logicalCount)
+        #expect(logical == ProcessInfo.processInfo.processorCount)
+        #expect(topology.physicalCount.map { $0 <= logical } ?? true)
+        // Apple Silicon splits the cores into named clusters; Intel reports none at all.
+        if !topology.clusters.isEmpty {
+            #expect(topology.clusters.reduce(0) { $0 + $1.logicalCount } == logical)
+            #expect(topology.clusters.allSatisfy { !$0.name.isEmpty && $0.logicalCount > 0 })
+        }
+    }
+
+    @Test func liveBootTimeIsInThePast() throws {
+        let boot = try #require(SystemInfoCollector.bootTime())
+        let uptime = Date().timeIntervalSince(boot)
+        #expect(uptime > 0)
+        #expect(abs(uptime - ProcessInfo.processInfo.systemUptime) < 86_400)   // sleep time aside, same ballpark
+    }
+}
+
+@Suite struct MemoryCompositionTests {
+    private let pages = MemoryCollector.PageCounts(internalPages: 100, purgeable: 20, wired: 30,
+                                                  compressor: 10, external: 40)
+
+    @Test func activityMonitorSplit() {
+        let r = MemoryCollector.reading(pages: pages, pageSize: 1_000, totalBytes: 300_000,
+                                        swapUsedBytes: 5_000, pressure: nil)
+        #expect(r.appBytes == 80_000)            // internal − purgeable
+        #expect(r.cachedFilesBytes == 60_000)    // external + purgeable
+        #expect(r.usedBytes == 120_000)          // app + wired + compressed, swap excluded
+    }
+
+    @Test func ringSlicesSumToInstalledMemory() {
+        let r = MemoryCollector.reading(pages: pages, pageSize: 1_000, totalBytes: 300_000,
+                                        swapUsedBytes: 5_000, pressure: nil)
+        #expect(r.usedBytes + r.cachedFilesBytes + r.freeBytes == r.totalBytes)
+    }
+
+    @Test func freeNeverUnderflowsWhenAccountingExceedsTotal() {
+        let r = MemoryCollector.reading(pages: pages, pageSize: 1_000, totalBytes: 100_000,
+                                        swapUsedBytes: 0, pressure: nil)
+        #expect(r.freeBytes == 0)
+    }
+}

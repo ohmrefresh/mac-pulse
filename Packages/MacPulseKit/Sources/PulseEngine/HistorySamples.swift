@@ -25,6 +25,7 @@ enum HistorySamples {
         add(.batteryTemperatureC, s.sensors?.batteryCelsius)
         add(.hottestTemperatureC, s.sensors?.hottest?.celsius)
         add(.fanRPM, s.sensors?.fans.map(\.rpm).max())
+        add(.loadAverage1, s.loadAverage?.oneMinute)
         return out
     }
 

@@ -46,6 +46,22 @@ enum MetricStyle {
     }
 }
 
+extension MetricStyle {
+    /// Stepped shades of the one metric tint, for charts with several parts of the same family
+    /// (memory ring and bands, per-core lines). Keeps the one-tint-per-metric rule intact.
+    ///
+    /// Opacity alone is not enough: over a dark background every step still reads as the same
+    /// bright hue. Desaturating while lightening walks the tint from deep to pale, which separates
+    /// in both appearances.
+    func shade(_ index: Int, of count: Int) -> Color {
+        guard count > 1, let base = NSColor(tint).usingColorSpace(.deviceRGB) else { return tint }
+        let step = Double(min(index, count - 1)) / Double(count - 1)
+        return Color(hue: Double(base.hueComponent),
+                     saturation: Double(base.saturationComponent) * (1 - 0.7 * step),
+                     brightness: min(Double(base.brightnessComponent) * (1 + 0.4 * step), 1))
+    }
+}
+
 // MARK: - Sparkline
 
 /// Shape-only trend line with a gradient fill. Plots the last `points` values; fewer values sit at the right edge.
@@ -178,6 +194,109 @@ struct FooterStats: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .minimumScaleFactor(0.75)
+            }
+        }
+    }
+}
+
+/// Statistics rail beside a chart. A row whose value is nil is **omitted**: a figure this Mac cannot
+/// report must not look like a reading that broke (ADR 0002's fail-soft rule, applied to the UI).
+struct StatRail: View {
+    struct Row: Identifiable {
+        let label: String
+        let value: String?
+        var id: String { label }
+    }
+
+    let rows: [Row]
+
+    var body: some View {
+        VStack(spacing: 7) {
+            ForEach(rows.filter { $0.value != nil }) { row in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(row.label).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(row.value ?? "").monospacedDigit().lineLimit(1)
+                }
+                .font(.callout)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .minimumScaleFactor(0.8)
+    }
+}
+
+/// "↑ 5% vs 5m avg" on a summary card. Nil (a series too short to have a trend) draws nothing,
+/// and changes below the noise floor are not worth an arrow.
+struct DeltaLabel: View {
+    let value: Double?
+    var format: (Double) -> String = { Format.percent(abs($0)) }
+    /// All four Performance cards measure load, so rising is the direction worth noticing.
+    var noiseFloor: Double = 0.5
+
+    var body: some View {
+        if let value, abs(value) >= noiseFloor {
+            HStack(spacing: 3) {
+                Image(systemName: value > 0 ? "arrow.up" : "arrow.down")
+                    .foregroundStyle(value > 0 ? Color.orange : Color.green)
+                Text(format(value)).monospacedDigit()
+                Text("vs 5m avg").foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .lineLimit(1)
+            .fixedSize()
+        }
+    }
+}
+
+/// Ring of parts that add up to a whole, with the headline figure in the middle.
+struct DonutChart: View {
+    struct Slice: Identifiable {
+        let label: String
+        let value: Double
+        let tint: Color
+        var id: String { label }
+    }
+
+    let slices: [Slice]
+    let centerValue: String
+    let centerCaption: String
+    var diameter: CGFloat = 150
+
+    var body: some View {
+        Chart(slices) { slice in
+            SectorMark(angle: .value(slice.label, slice.value), innerRadius: .ratio(0.68), angularInset: 1.5)
+                .foregroundStyle(slice.tint)
+                .cornerRadius(3)
+        }
+        .chartLegend(.hidden)
+        .chartBackground { _ in
+            VStack(spacing: 1) {
+                Text(centerValue).font(.title3.weight(.semibold)).monospacedDigit()
+                Text(centerCaption).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+        .accessibilityLabel("\(centerValue) \(centerCaption)")
+    }
+}
+
+/// Chart with its statistics rail beside it, dropping the rail underneath when the window is narrow
+/// (the dashboard's minimum width is 980).
+struct ChartWithRail<Content: View>: View {
+    let rail: StatRail
+    var railWidth: CGFloat = 230
+    @ViewBuilder let chart: Content
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 20) {
+                chart.frame(minWidth: 420)
+                rail.frame(width: railWidth)
+            }
+            VStack(alignment: .leading, spacing: 14) {
+                chart
+                rail
             }
         }
     }

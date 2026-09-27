@@ -29,6 +29,8 @@ public enum MetricKind: String, Sendable, Codable, CaseIterable {
     case batteryTemperatureC = "battery_temp"
     /// Warmest of all temperature sensors, °C (private API, ADR 0002).
     case hottestTemperatureC = "hottest_temp"
+    /// Kernel run-queue average over one minute.
+    case loadAverage1 = "load1"
 }
 
 public struct MetricSample: Sendable, Codable, Equatable {

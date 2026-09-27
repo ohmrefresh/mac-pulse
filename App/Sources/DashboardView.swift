@@ -77,7 +77,10 @@ struct DashboardView: View {
             switch selection ?? .overview {
             case .overview: OverviewView(metrics: metrics, runDiagnostics: { showDiagnostics = true },
                                          showTimeline: { selection = .timeline })
-            case .performance: PerformanceView(metrics: metrics)
+            case .performance: PerformanceView(metrics: metrics, showMemoryTimeline: {
+                timelineCategory = .memory
+                selection = .timeline
+            })
             case .network: NetworkDetailView(metrics: metrics)
             case .processes: ProcessesView(metrics: metrics, search: search)
             case .developer: DeveloperView(metrics: metrics, settings: settings)

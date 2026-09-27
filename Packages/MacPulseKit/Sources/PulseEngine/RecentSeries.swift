@@ -31,8 +31,27 @@ public struct RecentSeries: Sendable, Equatable {
         Array(values.suffix(count))
     }
 
+    public var count: Int { storage.count }
+
     public var average: Double? {
         storage.isEmpty ? nil : storage.reduce(0, +) / Double(storage.count)
+    }
+
+    /// Mean of the newest `seconds` of wall time, given how far apart samples are. NaN gaps are skipped.
+    public func average(lastSeconds seconds: TimeInterval, interval: TimeInterval) -> Double? {
+        guard interval > 0 else { return nil }
+        let recent = suffix(max(1, Int((seconds / interval).rounded()))).filter { !$0.isNaN }
+        return recent.isEmpty ? nil : recent.reduce(0, +) / Double(recent.count)
+    }
+
+    /// Latest value minus its recent average — the cards' \"vs 5m avg\" delta. Nil until the series
+    /// spans `minimumSpan` of wall time, so a freshly launched app shows no arrow rather than a wrong one.
+    public func trend(lastSeconds seconds: TimeInterval = 300, interval: TimeInterval,
+                      minimumSpan: TimeInterval = 150) -> Double? {
+        guard interval > 0, Double(count) * interval >= minimumSpan,
+              let last = values.last, !last.isNaN,
+              let mean = average(lastSeconds: seconds, interval: interval) else { return nil }
+        return last - mean
     }
 }
 
@@ -60,6 +79,16 @@ public struct TimedSeries: Sendable, Equatable {
         guard let last = samples.last,
               let base = samples.last(where: { last.time.timeIntervalSince($0.time) >= interval }) else { return nil }
         return last.value - base.value
+    }
+
+    /// Latest value minus its average over `interval`, matching `RecentSeries.trend` for series
+    /// whose cadence varies (sensors run at 5 s or 60 s depending on what is on screen).
+    public func trend(over interval: TimeInterval = 300, minimumSpan: TimeInterval = 150) -> Double? {
+        guard let last = samples.last, let first = samples.first,
+              last.time.timeIntervalSince(first.time) >= minimumSpan else { return nil }
+        let window = samples.filter { last.time.timeIntervalSince($0.time) <= interval }
+        guard !window.isEmpty else { return nil }
+        return last.value - window.reduce(0) { $0 + $1.value } / Double(window.count)
     }
 
     public static func == (lhs: TimedSeries, rhs: TimedSeries) -> Bool {

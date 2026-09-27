@@ -23,7 +23,16 @@ public final class LiveMetrics {
     public private(set) var sensors: SensorsReading?
     public private(set) var peripheralBatteries: [PeripheralBattery] = []
     public private(set) var developer = DeveloperSnapshot()
+    public private(set) var loadAverage: LoadAverage?
     public let processorName: String?
+    /// Fixed for the life of the process; `performanceCores`/`efficiencyCores` are nil on Intel.
+    public let cpuTopology: CPUTopology
+    @ObservationIgnored private let bootTime: Date?
+
+    /// Nil if `kern.boottime` could not be read.
+    public var uptime: TimeInterval? {
+        bootTime.map { Date().timeIntervalSince($0) }
+    }
 
     public private(set) var samplingInterval: TimeInterval
 
@@ -32,6 +41,17 @@ public final class LiveMetrics {
     public private(set) var memoryHistory = RecentSeries(capacity: 300)
     public private(set) var downHistory = RecentSeries(capacity: 300)
     public private(set) var upHistory = RecentSeries(capacity: 300)
+    /// GPU % per GPU sample — 1 s while the Performance page is visible, else 5 s (`gpuInterval`).
+    public private(set) var gpuHistory = RecentSeries(capacity: 300)
+    /// One-minute load average per fast sample.
+    public private(set) var loadHistory = RecentSeries(capacity: 300)
+    /// Memory Used split into its parts, for the stacked Live chart. Same cadence as `memoryHistory`.
+    public private(set) var memoryAppHistory = RecentSeries(capacity: 300)
+    public private(set) var memoryWiredHistory = RecentSeries(capacity: 300)
+    public private(set) var memoryCompressedHistory = RecentSeries(capacity: 300)
+    public private(set) var memoryCachedHistory = RecentSeries(capacity: 300)
+    /// One series per logical core, rebuilt if the core count ever changes.
+    public private(set) var perCoreHistory: [RecentSeries] = []
     /// Battery percent per battery sample (5 s cadence → 10 min).
     public private(set) var batteryHistory = RecentSeries(capacity: 120)
     /// °C per sensor sample (5–60 s cadence depending on visibility), timestamped for 15-min changes.
@@ -51,6 +71,7 @@ public final class LiveMetrics {
     @ObservationIgnored private var processListViewers = 0
     @ObservationIgnored private var sensorViewers = 0
     @ObservationIgnored private var developerViewers = 0
+    @ObservationIgnored private var performanceViewers = 0
     @ObservationIgnored private let developerMonitor = DeveloperMonitor()
 
     // MARK: Alerts and timeline
@@ -76,6 +97,8 @@ public final class LiveMetrics {
 
     public init(baseInterval: TimeInterval = 1, recorder: HistoryRecorder? = nil) {
         processorName = CPUCollector.processorName()
+        cpuTopology = SystemInfoCollector.topology()
+        bootTime = SystemInfoCollector.bootTime()
         self.recorder = recorder
         sampler = Sampler(baseInterval: baseInterval, recorder: recorder)
         prober = Prober(recorder: recorder)
@@ -171,6 +194,22 @@ public final class LiveMetrics {
         if sensorViewers == 0 { let sampler = self.sampler; Task { await sampler.setSensorsVisible(false) } }
     }
 
+    /// The Performance page samples the GPU every base interval instead of every 5 s while it is visible.
+    /// Reference-counted, like the process-list and sensor gates.
+    public func performanceAppeared() {
+        performanceViewers += 1
+        if performanceViewers == 1 { let sampler = self.sampler; Task { await sampler.setPerformanceVisible(true) } }
+    }
+
+    public func performanceDisappeared() {
+        guard performanceViewers > 0 else { return }
+        performanceViewers -= 1
+        if performanceViewers == 0 { let sampler = self.sampler; Task { await sampler.setPerformanceVisible(false) } }
+    }
+
+    /// Seconds between GPU samples right now — charts need their own series' spacing, not `samplingInterval`.
+    public var gpuInterval: TimeInterval { performanceViewers > 0 ? samplingInterval : 5 }
+
     private func setProcessesVisible(_ visible: Bool) {
         let sampler = self.sampler
         Task { await sampler.setProcessesVisible(visible) }
@@ -218,10 +257,14 @@ public final class LiveMetrics {
 
     /// Average over the last 5 minutes of wall time, whatever the sampling interval.
     public var cpuFiveMinuteAverage: Double? {
-        let count = max(1, Int((300 / samplingInterval).rounded()))
-        let recent = cpuHistory.suffix(count)
-        return recent.isEmpty ? nil : recent.reduce(0, +) / Double(recent.count)
+        cpuHistory.average(lastSeconds: 300, interval: samplingInterval)
     }
+
+    /// Card deltas: current value minus its 5-minute average. Nil until the series spans 2.5 min.
+    public var cpuTrend: Double? { cpuHistory.trend(interval: samplingInterval) }
+    public var memoryTrend: Double? { memoryHistory.trend(interval: samplingInterval) }
+    public var gpuTrend: Double? { gpuHistory.trend(interval: gpuInterval) }
+    public var temperatureTrend: Double? { temperatureHistory.trend() }
 
     /// Highest CPU % over the last 5 minutes of wall time.
     public var cpuFiveMinutePeak: Double? {
@@ -301,8 +344,24 @@ public final class LiveMetrics {
     }
 
     func apply(_ s: Snapshot) {
-        if let v = s.cpu { cpu = v; cpuHistory.append(v.totalPercent) }
-        if let v = s.memory { memory = v; memoryHistory.append(v.usedPercent) }
+        if let v = s.cpu {
+            cpu = v
+            cpuHistory.append(v.totalPercent)
+            if perCoreHistory.count != v.perCorePercent.count {
+                perCoreHistory = v.perCorePercent.map { _ in RecentSeries(capacity: 300) }
+            }
+            for (index, value) in v.perCorePercent.enumerated() { perCoreHistory[index].append(value) }
+        }
+        if let v = s.memory {
+            memory = v
+            memoryHistory.append(v.usedPercent)
+            let total = Double(max(v.totalBytes, 1))
+            memoryAppHistory.append(Double(v.appBytes) / total * 100)
+            memoryWiredHistory.append(Double(v.wiredBytes) / total * 100)
+            memoryCompressedHistory.append(Double(v.compressedBytes) / total * 100)
+            memoryCachedHistory.append(Double(v.cachedFilesBytes) / total * 100)
+        }
+        if let v = s.loadAverage { loadAverage = v; loadHistory.append(v.oneMinute) }
         if let v = s.network {
             network = v
             downHistory.append(v.downBytesPerSec)
@@ -315,7 +374,7 @@ public final class LiveMetrics {
             thermal = v
         }
         if let v = s.processes { processes = v }
-        if let v = s.gpu { gpu = v }
+        if let v = s.gpu { gpu = v; gpuHistory.append(v.utilizationPercent) }
         if let v = s.sensors { applySensors(v, at: Date()) }
         if let v = s.peripheralBatteries { peripheralBatteries = v }
         let now = Date()

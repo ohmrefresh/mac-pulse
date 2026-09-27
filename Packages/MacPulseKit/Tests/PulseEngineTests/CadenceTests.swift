@@ -18,6 +18,16 @@ import Testing
         #expect(cadence.due(at: 0) == Set(SamplingJob.allCases))
     }
 
+    @Test func gpuSpeedsUpOnlyWhileThePerformancePageIsVisible() {
+        func gpuTicks(visible: Bool) -> Int {
+            var cadence = Cadence(baseInterval: 1)
+            cadence.performanceVisible = visible
+            return (0...60).reduce(0) { $0 + (cadence.due(at: Double($1)).contains(.gpu) ? 1 : 0) }
+        }
+        #expect(gpuTicks(visible: false) == 13)   // 0, 5, …, 60
+        #expect(gpuTicks(visible: true) == 61)
+    }
+
     @Test func backgroundCadences() {
         let c = counts(seconds: 60, visible: false)
         #expect(c[.fast] == 61)

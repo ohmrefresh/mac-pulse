@@ -25,3 +25,12 @@ import Testing
         #expect(PeripheralBatteryCollector.sample().allSatisfy { (0...100).contains($0.percent) })
     }
 }
+
+@Suite struct GPUNameTests {
+    @Test func liveGPUCarriesItsModelName() throws {
+        let gpu = try #require(GPUCollector.sample(), "no IOAccelerator on this host")
+        let name = try #require(gpu.name, "IOAccelerator reported no model")
+        #expect(!name.isEmpty)
+        #expect(!name.contains("\0"))       // the property is a NUL-terminated blob
+    }
+}

@@ -56,6 +56,21 @@ enum Format {
     /// "3h 42m" for a minute count.
     static func duration(minutes: Int) -> String { "\(minutes / 60)h \(minutes % 60)m" }
 
+    /// "3d 12h 16m" — uptime, which is usually days rather than hours.
+    static func uptime(_ seconds: TimeInterval) -> String {
+        let total = Int(max(seconds, 0))
+        let (days, hours, minutes) = (total / 86_400, total % 86_400 / 3_600, total % 3_600 / 60)
+        return days > 0 ? "\(days)d \(hours)h \(minutes)m" : "\(hours)h \(minutes)m"
+    }
+
+    /// "4.05 GHz". Frequencies are reported in hertz.
+    static func frequency(_ hertz: Double) -> String {
+        String(format: "%.2f GHz", hertz / 1e9)
+    }
+
+    /// Load average is a thread count, not a percentage, so it keeps two decimals.
+    static func load(_ value: Double) -> String { String(format: "%.2f", value) }
+
     static func health(_ level: HealthLevel) -> String {
         switch level {
         case .healthy: "Healthy"

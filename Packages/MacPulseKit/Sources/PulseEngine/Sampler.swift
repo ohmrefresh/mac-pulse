@@ -14,6 +14,7 @@ public struct Snapshot: Sendable {
     public var processes: [ProcessRow]?
     public var gpu: GPUReading?
     public var sensors: SensorsReading?
+    public var loadAverage: LoadAverage?
     public var peripheralBatteries: [PeripheralBattery]?
 }
 
@@ -64,6 +65,11 @@ actor Sampler {
         cadence.sensorsVisible = visible
     }
 
+    /// Performance page visibility: speeds up the GPU job (and, with `IOReportClient`, frequency).
+    func setPerformanceVisible(_ visible: Bool) {
+        cadence.performanceVisible = visible
+    }
+
     func setSensorsInMenuBar(_ value: Bool) {
         cadence.sensorsInMenuBar = value
     }
@@ -94,10 +100,13 @@ actor Sampler {
             s.cpu = cpu.sample()
             s.memory = memory.sample()
             s.network = network.sample(now: now)
+            s.loadAverage = SystemInfoCollector.loadAverage()
         }
         if due.contains(.power) {
             s.battery = battery.sample()
             s.thermal = thermal.sample()
+        }
+        if due.contains(.gpu) {
             s.gpu = GPUCollector.sample()
         }
         if due.contains(.disk) {
