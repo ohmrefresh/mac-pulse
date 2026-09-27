@@ -142,8 +142,12 @@ public final class IOReportClient: @unchecked Sendable {
         if let energy = copyChannels("Energy Model" as CFString, nil, 0, 0, 0)?.takeRetainedValue() {
             mergeChannels(cpu, energy, nil)
         }
+        // Those two groups are 441 channels on an M5 Pro and this reads two of them. Sampling the
+        // rest still costs: subscribe to what is actually read. Most of the per-call time is fixed
+        // overhead inside IOReport, so this trims roughly a fifth, not the whole difference.
+        let wanted = Self.onlyChannelsWeRead(cpu, subgroup: channelSubgroup, name: channelName)
         var subscribed: Unmanaged<CFMutableDictionary>?
-        guard let subscription = createSubscription(nil, cpu, &subscribed, 0, nil) else { return nil }
+        guard let subscription = createSubscription(nil, wanted, &subscribed, 0, nil) else { return nil }
 
         self.createSamples = createSamples
         self.createSamplesDelta = createSamplesDelta
@@ -156,7 +160,7 @@ public final class IOReportClient: @unchecked Sendable {
         self.stateResidency = stateResidency
         self.simpleValue = simpleValue
         self.subscription = subscription
-        self.channels = cpu
+        self.channels = wanted
         self.dvfsTables = Self.dvfsTables()
     }
 
@@ -220,6 +224,24 @@ public final class IOReportClient: @unchecked Sendable {
     }
 
     private static let nonFrequencyStates: Set<String> = ["DOWN", "IDLE", "OFF", "NON_IDLE"]
+
+    /// The cluster residency channels and the one energy counter this client reports. Anything the
+    /// subscription cannot narrow (an unexpected shape) is left whole rather than dropped, so a
+    /// future macOS that reorganises the dictionary degrades to the old cost, not to no data.
+    private static func onlyChannelsWeRead(_ channels: CFMutableDictionary,
+                                           subgroup: ChannelString, name: ChannelString) -> CFMutableDictionary {
+        guard let all = (channels as NSDictionary)["IOReportChannels"] as? [CFDictionary] else { return channels }
+        let keep = all.filter { channel in
+            let group = subgroup(channel)?.takeUnretainedValue() as String? ?? ""
+            let channelName = name(channel)?.takeUnretainedValue() as String? ?? ""
+            if group == "CPU Complex Performance States" { return !channelName.hasSuffix("_IDLE") }
+            return channelName == "GPU Energy"
+        }
+        guard !keep.isEmpty else { return channels }
+        let narrowed = NSMutableDictionary(dictionary: channels as NSDictionary)
+        narrowed["IOReportChannels"] = keep as NSArray
+        return narrowed as CFMutableDictionary
+    }
 
     /// Every DVFS table the power manager publishes that is actually a frequency ladder, in hertz.
     ///

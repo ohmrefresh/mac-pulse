@@ -12,6 +12,24 @@ struct CollectorBenchmarks {
         return ms / Double(iterations)
     }
 
+    /// What the Performance page accelerates while it is visible. These dominate its CPU cost:
+    /// measured on an M5 Pro, IOReport is ~4 ms per call at 1 Hz and sensors ~14 ms at 0.2 Hz,
+    /// together about 0.7% of one core — far more than the charts they sit next to.
+    @Test func performancePageCollectorsStayWithinBudget() {
+        var costs: [(String, Double)] = [("gpu", averageMs(50) { _ = GPUCollector.sample() })]
+        if let client = IOReportClient() {
+            _ = client.sample()
+            costs.append(("ioreport", averageMs(20) { _ = client.sample() }))
+        }
+        for (name, ms) in costs {
+            print("\(name): \(String(format: "%.2f", ms)) ms/call")
+        }
+        #expect(costs.first { $0.0 == "gpu" }?.1 ?? 0 < 1)
+        // A narrowed subscription measured 4.2 ms; 8 ms leaves room for slower Macs before the
+        // 1 Hz cadence starts costing more than 1% of a core.
+        #expect(costs.first { $0.0 == "ioreport" }?.1 ?? 0 < 8)
+    }
+
     @Test func fastCollectorsUnderHalfMillisecond() {
         var cpu = CPUCollector()
         let memory = MemoryCollector()
