@@ -92,13 +92,21 @@ public final class HistoryStore: Sendable {
                     """)
             }
         }
+        m.registerMigration("v2-timeline") { db in
+            try db.execute(sql: """
+                CREATE TABLE timeline_events (id TEXT PRIMARY KEY NOT NULL, ts REAL NOT NULL, category TEXT NOT NULL,
+                                              severity INTEGER NOT NULL, title TEXT NOT NULL, detail TEXT);
+                CREATE INDEX timeline_events_ts ON timeline_events (ts);
+                """)
+        }
         return m
     }
 
     // MARK: Writing
 
     /// Inserts a batch, rolls up completed buckets and prunes — all in one transaction.
-    public func write(samples: [MetricSample], processes: [ProcessSample], now: Date, retention: RetentionPreset) throws {
+    public func write(samples: [MetricSample], processes: [ProcessSample], events: [TimelineEvent] = [],
+                      now: Date, retention: RetentionPreset) throws {
         let nowSeconds = Int64(now.timeIntervalSince1970.rounded(.down))
         try db.write { db in
             let insertSample = try db.makeStatement(sql: "INSERT OR REPLACE INTO samples_1s (metric, ts, value) VALUES (?, ?, ?)")
@@ -109,6 +117,12 @@ public final class HistoryStore: Sendable {
             for p in processes {
                 try insertProcess.execute(arguments: [Self.seconds(p.time), Int64(p.pid), p.name, p.cpuPercent, Int64(clamping: p.memoryBytes)])
             }
+            for e in events {
+                try db.execute(sql: """
+                    INSERT OR REPLACE INTO timeline_events (id, ts, category, severity, title, detail) VALUES (?, ?, ?, ?, ?, ?)
+                    """, arguments: [e.id.uuidString, e.time.timeIntervalSince1970, e.category.rawValue,
+                                     e.severity.rawValue, e.title, e.detail])
+            }
             for tier in Self.aggregates {
                 try Self.rollUp(tier, until: nowSeconds, db)
             }
@@ -118,7 +132,7 @@ public final class HistoryStore: Sendable {
 
     public func clear() throws {
         try db.write { db in
-            for table in ["samples_1s", "process_samples", "rollup_state"] + Self.aggregates.map(\.table) {
+            for table in ["samples_1s", "process_samples", "rollup_state", "timeline_events"] + Self.aggregates.map(\.table) {
                 try db.execute(sql: "DELETE FROM \(table)")
             }
         }
@@ -153,6 +167,7 @@ public final class HistoryStore: Sendable {
         let cap = retention.seconds
         try db.execute(sql: "DELETE FROM samples_1s WHERE ts < ?", arguments: [now - min(raw.keepSeconds, cap)])
         try db.execute(sql: "DELETE FROM process_samples WHERE ts < ?", arguments: [now - min(processKeepSeconds, cap)])
+        try db.execute(sql: "DELETE FROM timeline_events WHERE ts < ?", arguments: [Double(now - cap)])
         for tier in aggregates {
             try db.execute(sql: "DELETE FROM \(tier.table) WHERE bucket < ?", arguments: [now - min(tier.keepSeconds, cap)])
         }
@@ -188,6 +203,22 @@ public final class HistoryStore: Sendable {
                 ProcessSample(time: Date(timeIntervalSince1970: TimeInterval($0["ts"] as Int64)),
                               pid: Int32(truncatingIfNeeded: $0["pid"] as Int64), name: $0["name"],
                               cpuPercent: $0["cpu"], memoryBytes: UInt64(max(0, $0["mem"] as Int64)))
+            }
+        }
+    }
+
+    /// Timeline events in a range, newest first.
+    public func events(from: Date, to: Date, limit: Int = 500) throws -> [TimelineEvent] {
+        try db.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, ts, category, severity, title, detail FROM timeline_events
+                WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT ?
+                """, arguments: [from.timeIntervalSince1970, to.timeIntervalSince1970, limit]).compactMap { row in
+                guard let id = UUID(uuidString: row["id"]),
+                      let category = TimelineCategory(rawValue: row["category"]),
+                      let severity = HealthLevel(rawValue: row["severity"]) else { return nil }
+                return TimelineEvent(id: id, time: Date(timeIntervalSince1970: row["ts"]), category: category,
+                                     severity: severity, title: row["title"], detail: row["detail"])
             }
         }
     }

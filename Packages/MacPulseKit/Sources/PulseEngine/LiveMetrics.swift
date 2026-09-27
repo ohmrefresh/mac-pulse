@@ -34,6 +34,16 @@ public final class LiveMetrics {
 
     @ObservationIgnored private var processListViewers = 0
 
+    // MARK: Alerts and timeline
+    public private(set) var alertRules: [AlertRule] = []
+    public private(set) var firingAlertIDs: Set<UUID> = []
+    /// Events since launch, newest last (capped). Older ones are in the history store.
+    public private(set) var recentEvents: [TimelineEvent] = []
+    /// Called for every fired/resolved alert; the app decides whether to notify.
+    @ObservationIgnored public var onAlert: ((AlertEvent) -> Void)?
+    @ObservationIgnored private var alertEngine = AlertEngine()
+    static let recentEventLimit = 200
+
     @ObservationIgnored private let sampler: Sampler
     @ObservationIgnored private let prober: Prober
     /// Nil when history is disabled (tests) or the database could not be opened.
@@ -120,11 +130,49 @@ public final class LiveMetrics {
         Array(processes.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(limit))
     }
 
+    public func setAlertRules(_ rules: [AlertRule]) {
+        alertRules = rules
+        alertEngine.setRules(rules)
+        firingAlertIDs = alertEngine.firingRuleIDs
+    }
+
+    /// Adds an event to the live list and the persistent timeline.
+    public func post(_ event: TimelineEvent) {
+        recentEvents.append(event)
+        if recentEvents.count > Self.recentEventLimit { recentEvents.removeFirst(recentEvents.count - Self.recentEventLimit) }
+        let recorder = self.recorder
+        Task { await recorder?.record(event: event) }
+    }
+
+    func evaluateAlerts(_ values: [(AlertMetric, Double)], at now: Date) {
+        guard !alertRules.isEmpty else { return }
+        for (metric, value) in values {
+            for event in alertEngine.evaluate(metric, value: value, at: now) {
+                post(Self.timelineEvent(for: event))
+                onAlert?(event)
+            }
+        }
+        let firing = alertEngine.firingRuleIDs
+        if firing != firingAlertIDs { firingAlertIDs = firing }
+    }
+
+    static func timelineEvent(for e: AlertEvent) -> TimelineEvent {
+        let r = e.rule
+        let comparator = switch r.comparator { case .above: ">"; case .atLeast: "≥"; case .below: "<"; case .atMost: "≤" }
+        let held = r.duration > 0 ? " for \(Int(r.duration)) s" : ""
+        let detail = "\(r.metric.displayName) \(r.metric.format(e.value)) · rule \(comparator) \(r.metric.format(r.threshold))\(held)"
+        return TimelineEvent(time: e.time, category: .alert,
+                             severity: e.kind == .fired ? r.severity.health : .healthy,
+                             title: e.kind == .fired ? "\(r.name)" : "\(r.name) resolved", detail: detail)
+    }
+
     func apply(_ reading: NetworkHealthReading) {
         networkHealth = reading
-        if reading.connectivity == .online {
-            latencyHistory.append(reading.internet?.latencyMs ?? .nan)
-        }
+        guard reading.connectivity == .online else { return }
+        latencyHistory.append(reading.internet?.latencyMs ?? .nan)
+        var values: [(AlertMetric, Double)] = [(.latencyMs, reading.internet?.latencyMs ?? .infinity)]
+        if let loss = reading.internet?.lossPercent { values.append((.packetLossPercent, loss)) }
+        evaluateAlerts(values, at: Date())
     }
 
     func recordThermalChange(_ state: ThermalState, at date: Date) {
@@ -147,6 +195,17 @@ public final class LiveMetrics {
             thermal = v
         }
         if let v = s.processes { processes = v }
+        evaluateAlerts(Self.alertValues(s), at: Date())
+    }
+
+    static func alertValues(_ s: Snapshot) -> [(AlertMetric, Double)] {
+        var values: [(AlertMetric, Double)] = []
+        if let v = s.cpu { values.append((.cpuPercent, v.totalPercent)) }
+        if let p = s.memory?.pressure { values.append((.memoryPressure, Double(p.health.rawValue))) }
+        if let d = s.disk { values.append((.diskFreeGB, Double(d.availableBytes) / 1e9)) }
+        if let b = s.battery { values.append((.batteryPercent, b.percent)) }
+        if let t = s.thermal { values.append((.thermalState, Double(t.rawValue))) }
+        return values
     }
 }
 

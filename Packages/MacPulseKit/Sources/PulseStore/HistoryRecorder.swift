@@ -9,6 +9,7 @@ public actor HistoryRecorder {
     private var retention: RetentionPreset
     private var samples: [MetricSample] = []
     private var processes: [ProcessSample] = []
+    private var events: [TimelineEvent] = []
     private var loop: Task<Void, Never>?
     /// Last write error, surfaced rather than silently dropping history.
     public private(set) var lastError: String?
@@ -43,17 +44,22 @@ public actor HistoryRecorder {
         processes.append(contentsOf: newProcesses)
     }
 
+    public func record(event: TimelineEvent) {
+        events.append(event)
+    }
+
     public func setRetention(_ preset: RetentionPreset) {
         retention = preset
     }
 
     /// Writes everything buffered. Also call on quit.
     public func flush(now: Date = Date()) {
-        let batch = samples, processBatch = processes
+        let batch = samples, processBatch = processes, eventBatch = events
         samples.removeAll(keepingCapacity: true)
         processes.removeAll(keepingCapacity: true)
+        events.removeAll(keepingCapacity: true)
         do {
-            try store.write(samples: batch, processes: processBatch, now: now, retention: retention)
+            try store.write(samples: batch, processes: processBatch, events: eventBatch, now: now, retention: retention)
             lastError = nil
         } catch {
             lastError = String(describing: error)
@@ -63,6 +69,7 @@ public actor HistoryRecorder {
     public func clear() throws {
         samples.removeAll()
         processes.removeAll()
+        events.removeAll()
         try store.clear()
     }
 }

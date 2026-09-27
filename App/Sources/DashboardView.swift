@@ -42,6 +42,8 @@ enum DashboardSection: String, CaseIterable, Identifiable {
 
 struct DashboardView: View {
     let metrics: LiveMetrics
+    let settings: AppSettings
+    let notifier: AlertNotifier
     @State private var selection: DashboardSection? = .overview
 
     var body: some View {
@@ -66,7 +68,8 @@ struct DashboardView: View {
             case .storage: StorageView(metrics: metrics)
             case .battery: BatteryView(metrics: metrics)
             case .sensors: SensorsView(metrics: metrics)
-            case .timeline, .alerts:
+            case .alerts: AlertsView(metrics: metrics, settings: settings, notifier: notifier)
+            case .timeline:
                 // Need persistent history (PulseStore) — v1.0 / Phase 2.
                 ContentUnavailableView(selection?.rawValue ?? "", systemImage: selection?.symbol ?? "clock",
                                        description: Text("Arrives with history in v1.0."))

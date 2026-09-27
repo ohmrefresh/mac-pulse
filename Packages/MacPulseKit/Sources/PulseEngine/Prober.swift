@@ -11,19 +11,32 @@ public struct ProbeReading: Sendable, Equatable {
     public var lossPercent: Double?
 }
 
+public struct DNSReading: Sendable, Equatable {
+    public var server: String
+    /// Nil when the resolver did not answer in time.
+    public var latencyMs: Double?
+}
+
 public struct NetworkHealthReading: Sendable, Equatable {
     public var connectivity: Connectivity
     public var gateway: ProbeReading?
+    /// The user's ping target (PRD §14); drives network health.
     public var internet: ProbeReading?
+    /// A second public target (8.8.8.8, or 1.1.1.1 if that is the user's target), to tell a
+    /// target-specific problem from a general upstream one.
+    public var secondary: ProbeReading?
+    public var dns: DNSReading?
     public var health: HealthLevel
 
-    /// Pure: health from internet latency/loss (PRD §7), Offline ⇒ Critical.
+    /// Pure: health from the primary internet target's latency/loss (PRD §7), Offline ⇒ Critical.
     static func make(connectivity: Connectivity, gateway: ProbeReading?, internet: ProbeReading?,
+                     secondary: ProbeReading? = nil, dns: DNSReading? = nil,
                      thresholds: NetworkThresholds) -> NetworkHealthReading {
         let health = thresholds.health(connectivity: connectivity,
                                        latencyMs: internet?.latencyMs,
                                        packetLossPercent: internet?.lossPercent)
-        return NetworkHealthReading(connectivity: connectivity, gateway: gateway, internet: internet, health: health)
+        return NetworkHealthReading(connectivity: connectivity, gateway: gateway, internet: internet,
+                                    secondary: secondary, dns: dns, health: health)
     }
 }
 
@@ -36,6 +49,7 @@ actor Prober {
     private var gatewayAddress: String?
     private var gatewayLoss = LossWindow()
     private var internetLoss = LossWindow()
+    private var secondaryLoss = LossWindow()
     private var loop: Task<Void, Never>?
     private let recorder: HistoryRecorder?
 
@@ -66,6 +80,10 @@ actor Prober {
         loop = nil
     }
 
+    static func secondaryTarget(for primary: String) -> String {
+        primary == "8.8.8.8" ? "1.1.1.1" : "8.8.8.8"
+    }
+
     func configure(internetTarget: String, thresholds: NetworkThresholds) {
         if internetTarget != self.internetTarget {
             internetLoss = LossWindow()   // loss history belongs to the old target
@@ -83,20 +101,28 @@ actor Prober {
             gatewayAddress = gateway
             gatewayLoss = LossWindow()   // new network: old history no longer applies
         }
-        sequence &+= 2
+        sequence &+= 3
         let seq = sequence
         let target = internetTarget
+        let secondTarget = Self.secondaryTarget(for: target)
+        let resolver = DNSProbe.systemResolver()
         async let internetRTT = ICMPPing.ping(target, sequence: seq)
-        async let gatewayRTT: Double? = gateway == nil ? nil : ICMPPing.ping(gateway!, sequence: seq &+ 1)
-        let (internetResult, gatewayResult) = await (internetRTT, gatewayRTT)
+        async let secondaryRTT = ICMPPing.ping(secondTarget, sequence: seq &+ 1)
+        async let gatewayRTT: Double? = gateway == nil ? nil : ICMPPing.ping(gateway!, sequence: seq &+ 2)
+        async let dnsRTT: Double? = resolver == nil ? nil : DNSProbe.query(server: resolver!)
+        let (internetResult, secondaryResult, gatewayResult, dnsResult) = await (internetRTT, secondaryRTT, gatewayRTT, dnsRTT)
 
         internetLoss.record(success: internetResult != nil)
+        secondaryLoss.record(success: secondaryResult != nil)
         let internet = ProbeReading(address: target, latencyMs: internetResult, lossPercent: internetLoss.lossPercent)
+        let secondary = ProbeReading(address: secondTarget, latencyMs: secondaryResult, lossPercent: secondaryLoss.lossPercent)
         var gatewayReading: ProbeReading?
         if let gateway {
             gatewayLoss.record(success: gatewayResult != nil)
             gatewayReading = ProbeReading(address: gateway, latencyMs: gatewayResult, lossPercent: gatewayLoss.lossPercent)
         }
-        return .make(connectivity: .online, gateway: gatewayReading, internet: internet, thresholds: thresholds)
+        let dns = resolver.map { DNSReading(server: $0, latencyMs: dnsResult) }
+        return .make(connectivity: .online, gateway: gatewayReading, internet: internet,
+                     secondary: secondary, dns: dns, thresholds: thresholds)
     }
 }

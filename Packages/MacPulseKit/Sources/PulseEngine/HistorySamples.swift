@@ -31,6 +31,8 @@ enum HistorySamples {
         add(.latencyMs, r.internet?.latencyMs)
         add(.packetLossPercent, r.internet?.lossPercent)
         add(.gatewayLatencyMs, r.gateway?.latencyMs)
+        add(.secondaryLatencyMs, r.secondary?.latencyMs)
+        add(.dnsLatencyMs, r.dns?.latencyMs)
         return out
     }
 

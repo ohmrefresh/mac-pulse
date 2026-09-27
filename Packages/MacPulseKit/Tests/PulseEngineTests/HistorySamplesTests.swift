@@ -20,8 +20,11 @@ import PulseCollectors
         let online = NetworkHealthReading.make(connectivity: .online,
                                                gateway: ProbeReading(address: "10.0.0.1", latencyMs: nil, lossPercent: 50),
                                                internet: ProbeReading(address: "1.1.1.1", latencyMs: 18, lossPercent: 0),
+                                               secondary: ProbeReading(address: "8.8.8.8", latencyMs: 20, lossPercent: 0),
+                                               dns: DNSReading(server: "10.0.0.1", latencyMs: 420),
                                                thresholds: th)
-        #expect(Set(HistorySamples.from(online, at: t).map(\.kind)) == [.latencyMs, .packetLossPercent])
+        let values = Dictionary(uniqueKeysWithValues: HistorySamples.from(online, at: t).map { ($0.kind, $0.value) })
+        #expect(values == [.latencyMs: 18, .packetLossPercent: 0, .secondaryLatencyMs: 20, .dnsLatencyMs: 420])
         let offline = NetworkHealthReading.make(connectivity: .offline, gateway: nil, internet: nil, thresholds: th)
         #expect(HistorySamples.from(offline, at: t).isEmpty)
     }
@@ -35,5 +38,13 @@ import PulseCollectors
         #expect(top.map(\.pid) == [30, 29, 28, 1, 2, 3])
         let both = HistorySamples.topProcesses([rows[0]], at: t, limit: 3)
         #expect(both.count == 1)
+    }
+}
+
+@Suite struct ProberTargetTests {
+    @Test func secondaryTargetDiffersFromPrimary() {
+        #expect(Prober.secondaryTarget(for: "1.1.1.1") == "8.8.8.8")
+        #expect(Prober.secondaryTarget(for: "8.8.8.8") == "1.1.1.1")
+        #expect(Prober.secondaryTarget(for: "9.9.9.9") == "8.8.8.8")
     }
 }

@@ -62,8 +62,9 @@ while (( elapsed < DURATION )); do
 done
 end_cpu="$(cpu_seconds)"
 
-# 2 targets every 5 s; ICMP echo request + reply of 36 bytes each (20 IP + 8 ICMP + 8 payload).
-probe_bytes_per_hour=$(( 3600 / 5 * 2 * 2 * 36 ))
+# Every 5 s: 3 ICMP targets (request + reply, 36 bytes each: 20 IP + 8 ICMP + 8 payload)
+# plus one DNS query/response (~55 + ~100 bytes incl. IP/UDP headers).
+probe_bytes_per_hour=$(( 3600 / 5 * (3 * 2 * 36 + 155) ))
 
 awk -v a="$start_cpu" -v b="$end_cpu" -v d="$DURATION" -v rss="$peak_rss_kb" -v fp="$peak_fp_kb" \
     -v cpub="$CPU_BUDGET_PERCENT" -v rssb="$RSS_BUDGET_MB" -v net="$probe_bytes_per_hour" '

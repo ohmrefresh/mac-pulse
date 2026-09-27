@@ -80,7 +80,12 @@ struct NetworkDetailView: View {
                                 HealthBadge(level: h.health, label: h.connectivity == .offline ? "Offline" : nil)
                             }
                             probeRows("Internet", h.internet)
+                            probeRows("Second target", h.secondary)
                             probeRows("Gateway", h.gateway)
+                            if let dns = h.dns {
+                                KeyValue("DNS resolver", dns.server)
+                                KeyValue("  Lookup time", dns.latencyMs.map { "\(Int($0.rounded())) ms" } ?? "timeout")
+                            }
                         }
                     }
                 }

@@ -52,7 +52,9 @@ Module dependency chain (targets in `Packages/MacPulseKit`, then the app):
 - **PulseEngine** — single coalesced scheduler, alert state machine, timeline generator, diagnostics rules.
 - **MacPulse** — UI only. Single process; no daemon.
 
-Built so far: `PulseCore`; `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping); `PulseStore` (`HistoryStore` GRDB tiers + `HistoryRecorder` 30 s buffered writes); `PulseEngine` (`Cadence` + `Sampler` and `Prober` actors → `LiveMetrics` on the main actor, `HistorySamples` mapping, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard (all sections except Timeline/Alerts), Settings incl. retention + clear history. Not yet: DNS probe, alerts, timeline, diagnostics, history-range charts.
+Built so far: `PulseCore` (incl. `AlertRule` + PRD §12 templates, `TimelineEvent`); `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping, DNS probe); `PulseStore` (`HistoryStore` GRDB tiers + timeline events, `HistoryRecorder` 30 s buffered writes); `PulseEngine` (`Cadence` + `Sampler` and `Prober` actors → `LiveMetrics` on the main actor, `AlertEngine` state machine, `HistorySamples`, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard (all sections except Timeline), Alerts UI + `AlertNotifier`, Settings incl. retention + clear history. Not yet: timeline generator/UI, diagnostics, history-range charts.
+
+Alerts: templates are seeded **disabled**; notification permission is requested only when the user first enables a rule. Alert fire/resolve events go to the single `timeline_events` table (no separate alerts table).
 
 History: `MetricKind` raw values are persisted — never rename a case, only add. `LiveMetrics(recorder:)` takes the recorder by injection; tests pass none so they never touch the real database (`~/Library/Application Support/MacPulse/history.sqlite`).
 

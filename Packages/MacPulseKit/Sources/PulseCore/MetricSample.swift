@@ -11,6 +11,7 @@ public enum MetricKind: String, Sendable, Codable, CaseIterable {
     case networkUpBytesPerSec = "net_up"
     case latencyMs = "latency"
     case gatewayLatencyMs = "gw_latency"
+    case secondaryLatencyMs = "latency2"
     case packetLossPercent = "loss"
     case dnsLatencyMs = "dns"
     case diskFreeBytes = "disk_free"

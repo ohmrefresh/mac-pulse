@@ -87,6 +87,17 @@ import PulseCore
         #expect(try store.series(.cpuPercent, from: at(0), to: at(5), now: at(5)).isEmpty)
     }
 
+    @Test func timelineEventsRoundTripNewestFirstAndPrune() throws {
+        let store = try HistoryStore(url: nil)
+        let a = TimelineEvent(time: at(1), category: .alert, severity: .warning, title: "High CPU fired", detail: "CPU 94%")
+        let b = TimelineEvent(time: at(2.5), category: .connectivity, severity: .critical, title: "Offline")
+        try store.write(samples: [], processes: [], events: [a, b], now: at(3), retention: .thirtyDays)
+        #expect(try store.events(from: at(0), to: at(3)) == [b, a])
+        #expect(try store.events(from: at(0), to: at(3), limit: 1) == [b])
+        try store.write(samples: [], processes: [], now: at(3_700), retention: .oneHour)
+        #expect(try store.events(from: at(0), to: at(3_700)).isEmpty)
+    }
+
     @Test func onDiskDatabaseSurvivesReopen() throws {
         let url = FileManager.default.temporaryDirectory.appending(path: "pulse-\(UUID().uuidString)/history.sqlite")
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

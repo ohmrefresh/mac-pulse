@@ -42,6 +42,20 @@ final class AppSettings {
 
     var historyAvailable: Bool { metrics.recorder != nil }
 
+    var alertRules: [AlertRule] {
+        didSet {
+            if let data = try? JSONEncoder().encode(alertRules) { save(data, .alertRules) }
+            metrics.setAlertRules(alertRules)
+            let newlyEnabled = alertRules.contains { rule in
+                rule.isEnabled && !(oldValue.first { $0.id == rule.id }?.isEnabled ?? false)
+            }
+            if newlyEnabled { onAlertEnabled?() }
+        }
+    }
+
+    /// Called when a rule is switched on, so the app can ask for notification permission then.
+    @ObservationIgnored var onAlertEnabled: (() -> Void)?
+
     /// Deletes all stored history (PRD §13). Returns an error message on failure.
     func clearHistory() async -> String? {
         guard let recorder = metrics.recorder else { return "History is not available." }
@@ -69,11 +83,14 @@ final class AppSettings {
         lossWarningPercent = defaults.object(forKey: Key.lossWarningPercent.rawValue) as? Double ?? n.packetLossPercent.warning
         lossCriticalPercent = defaults.object(forKey: Key.lossCriticalPercent.rawValue) as? Double ?? n.packetLossPercent.critical
         retention = (defaults.object(forKey: Key.retention.rawValue) as? Int).flatMap(RetentionPreset.init(rawValue:)) ?? .thirtyDays
+        alertRules = defaults.data(forKey: Key.alertRules.rawValue)
+            .flatMap { try? JSONDecoder().decode([AlertRule].self, from: $0) } ?? AlertRule.templates
     }
 
     /// Push persisted values into the engine at launch (didSet does not run during init).
     func applyAtLaunch() {
         metrics.setSamplingInterval(samplingInterval)
+        metrics.setAlertRules(alertRules)
         pushNetworkConfig()
         let recorder = metrics.recorder, preset = retention
         Task { await recorder?.setRetention(preset) }
@@ -135,7 +152,7 @@ final class AppSettings {
 
     private enum Key: String {
         case menuBarItems, samplingInterval, showDockIcon, pingTarget
-        case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention
+        case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules
         case didOfferLaunchAtLogin
     }
 

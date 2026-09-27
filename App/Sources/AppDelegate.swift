@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         return LiveMetrics(recorder: recorder)
     }()
     private(set) lazy var settings = AppSettings(metrics: metrics)
+    let notifier = AlertNotifier()
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
     private var dashboardWindow: NSWindow?
@@ -28,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         settings.onMenuBarChange = { [weak self] in
             self?.resizeStatusItem()
             self?.updateStatusTitle()
+        }
+        metrics.onAlert = { [weak self] event in self?.notifier.deliver(event) }
+        settings.onAlertEnabled = { [weak self] in
+            guard let notifier = self?.notifier else { return }
+            Task { await notifier.requestAuthorizationIfNeeded() }
         }
         settings.applyAtLaunch()
         resizeStatusItem()
@@ -104,7 +110,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func openDashboard() {
         popover.performClose(nil)
         if dashboardWindow == nil {
-            let window = NSWindow(contentViewController: NSHostingController(rootView: DashboardView(metrics: metrics)))
+            let window = NSWindow(contentViewController: NSHostingController(
+                rootView: DashboardView(metrics: metrics, settings: settings, notifier: notifier)))
             window.title = "Mac Pulse"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.setContentSize(NSSize(width: 980, height: 660))
