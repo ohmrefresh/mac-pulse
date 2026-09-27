@@ -1,18 +1,22 @@
 import Foundation
 
+/// Persisted metric identifiers. Raw values are stored in history — never rename a case; add new ones.
 public enum MetricKind: String, Sendable, Codable, CaseIterable {
-    case cpuPercent
-    case memoryUsedBytes
-    case memoryPressure
-    case swapUsedBytes
-    case networkDownBytesPerSec
-    case networkUpBytesPerSec
-    case latencyMs
-    case packetLossPercent
-    case dnsLatencyMs
-    case diskFreeBytes
-    case batteryPercent
-    case thermalState
+    case cpuPercent = "cpu"
+    case memoryPercent = "mem"
+    /// HealthLevel raw value of the memory pressure (1 healthy … 3 critical).
+    case memoryPressure = "mem_pressure"
+    case swapUsedBytes = "swap"
+    case networkDownBytesPerSec = "net_down"
+    case networkUpBytesPerSec = "net_up"
+    case latencyMs = "latency"
+    case gatewayLatencyMs = "gw_latency"
+    case packetLossPercent = "loss"
+    case dnsLatencyMs = "dns"
+    case diskFreeBytes = "disk_free"
+    case batteryPercent = "battery"
+    /// ThermalState raw value (0 nominal … 3 critical).
+    case thermalState = "thermal"
 }
 
 public struct MetricSample: Sendable, Codable, Equatable {

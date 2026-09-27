@@ -52,13 +52,15 @@ Module dependency chain (targets in `Packages/MacPulseKit`, then the app):
 - **PulseEngine** — single coalesced scheduler, alert state machine, timeline generator, diagnostics rules.
 - **MacPulse** — UI only. Single process; no daemon.
 
-Built so far: `PulseCore`; `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping); `PulseEngine` (`Cadence` + `Sampler` actor and `Prober` actor → `LiveMetrics` on the main actor, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard window (Overview, Processes; other sections are placeholders), Settings (`AppSettings`, UserDefaults). Not yet: `PulseStore`, DNS probe, alerts, timeline, diagnostics.
+Built so far: `PulseCore`; `PulseCollectors` (CPU, memory, network, disk, battery, thermal, processes, ICMP ping); `PulseStore` (`HistoryStore` GRDB tiers + `HistoryRecorder` 30 s buffered writes); `PulseEngine` (`Cadence` + `Sampler` and `Prober` actors → `LiveMetrics` on the main actor, `HistorySamples` mapping, `MenuBarFormatter`, `RecentSeries`). App: status item, popover, dashboard (all sections except Timeline/Alerts), Settings incl. retention + clear history. Not yet: DNS probe, alerts, timeline, diagnostics, history-range charts.
+
+History: `MetricKind` raw values are persisted — never rename a case, only add. `LiveMetrics(recorder:)` takes the recorder by injection; tests pass none so they never touch the real database (`~/Library/Application Support/MacPulse/history.sqlite`).
 
 App UI rule: popover and dashboard host SwiftUI inside AppKit (`NSPopover`, `NSWindow`) and drop their hosting controller on close, so hidden UI never re-renders. Any view that shows a process list must call `metrics.processListAppeared()/processListDisappeared()` (reference-counted) to get 1 s scans. Add other targets to `Package.swift` (and as `project.yml` dependencies) as they are built.
 
 ## Invariants
 
-- **Overhead budgets (PRD §18) are hard limits:** idle CPU <1%, RSS <150 MB, network <1 MB/h, popover <150 ms, UI update <250 ms. Process scans run at 5s in background, 1s only while the popover/Processes tab is visible.
+- **Overhead budgets (PRD §18) are hard limits:** idle CPU <1%, memory <150 MB (physical footprint as `footprint`/Activity Monitor report it — not RSS, which counts shared framework pages), network <1 MB/h, popover <150 ms, UI update <250 ms. Process scans run at 5s in background, 1s only while the popover/Processes tab is visible.
 - **Scope:** v1.0 = PRD Phase 1 + Phase 2. Phase 1 is internal milestone M1. Phases 3–4 are post-1.0.
 - **Thresholds are user-configurable** — no hardcoded alert/network constants outside defaults in `PulseCore`.
 - **Alerts:** Inactive → Pending → Firing → Resolved; resolving needs the condition false for the same duration; notify once per firing, 10-min cooldown.

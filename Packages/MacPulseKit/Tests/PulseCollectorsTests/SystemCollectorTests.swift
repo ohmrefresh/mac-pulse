@@ -25,6 +25,8 @@ import Testing
     @Test func liveCountersIncludePrimaryInterface() throws {
         let primary = try #require(NetworkCollector.primaryInterface(), "test host has no network route")
         #expect(NetworkCollector.counters()[primary] != nil)
+        #expect(Array(NetworkCollector.counters(only: primary).keys) == [primary])
+        #expect(NetworkCollector.counters(only: "nonexistent0").isEmpty)
     }
 }
 

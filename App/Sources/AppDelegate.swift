@@ -1,10 +1,15 @@
 import AppKit
 import SwiftUI
 import PulseEngine
+import PulseStore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
-    let metrics = LiveMetrics()
+    /// History is optional: if the database cannot be opened the app still monitors live.
+    let metrics: LiveMetrics = {
+        let recorder = (try? HistoryStore(url: HistoryStore.defaultURL())).map { HistoryRecorder(store: $0) }
+        return LiveMetrics(recorder: recorder)
+    }()
     private(set) lazy var settings = AppSettings(metrics: metrics)
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
@@ -79,6 +84,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             titleUpdatePending = false
             updateStatusTitle()
         }
+    }
+
+    /// Flush buffered history (up to 30 s) before exiting.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard metrics.recorder != nil else { return .terminateNow }
+        Task { @MainActor in
+            await metrics.flushHistory()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     func popoverDidClose(_ notification: Notification) {

@@ -1,14 +1,18 @@
 import SwiftUI
 import PulseEngine
+import PulseStore
 
 struct SettingsView: View {
     @Bindable var settings: AppSettings
+    @State private var confirmClear = false
+    @State private var clearMessage: String?
 
     var body: some View {
         TabView {
             general.tabItem { Label("General", systemImage: "gearshape") }
             menuBar.tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
             network.tabItem { Label("Network", systemImage: "network") }
+            data.tabItem { Label("Data", systemImage: "externaldrive") }
         }
         .frame(width: 460)
         .padding(20)
@@ -52,6 +56,42 @@ struct SettingsView: View {
             LabeledContent("Packet loss critical") { stepper($settings.lossCriticalPercent, unit: "%", step: 1, range: 1...100) }
             Text("Probes run every 5 seconds against the gateway and the ping host.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var data: some View {
+        Form {
+            if settings.historyAvailable {
+                Picker("Keep history for", selection: $settings.retention) {
+                    ForEach(RetentionPreset.allCases, id: \.self) { Text(label($0)).tag($0) }
+                }
+                LabeledContent("Stored in") {
+                    Text(HistoryStore.defaultURL().deletingLastPathComponent().path(percentEncoded: false))
+                        .textSelection(.enabled).font(.caption)
+                }
+                Button("Clear History…", role: .destructive) { confirmClear = true }
+                if let clearMessage { Text(clearMessage).font(.caption).foregroundStyle(.secondary) }
+            } else {
+                Text("History is unavailable: the database could not be opened. Live monitoring still works.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .confirmationDialog("Delete all stored history?", isPresented: $confirmClear) {
+            Button("Clear History", role: .destructive) {
+                Task { clearMessage = await settings.clearHistory() ?? "History cleared." }
+            }
+        } message: {
+            Text("Charts, timeline and diagnostics lose everything recorded so far. This cannot be undone.")
+        }
+    }
+
+    private func label(_ preset: RetentionPreset) -> String {
+        switch preset {
+        case .oneHour: "1 hour"
+        case .sixHours: "6 hours"
+        case .oneDay: "24 hours"
+        case .sevenDays: "7 days"
+        case .thirtyDays: "30 days"
         }
     }
 

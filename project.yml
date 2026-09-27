@@ -20,6 +20,8 @@ targets:
     dependencies:
       - package: MacPulseKit
         product: PulseEngine
+      - package: MacPulseKit
+        product: PulseStore
     info:
       path: App/Info.plist
       properties:

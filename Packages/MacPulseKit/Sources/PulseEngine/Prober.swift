@@ -1,6 +1,7 @@
 import Foundation
 import PulseCore
 import PulseCollectors
+import PulseStore
 
 public struct ProbeReading: Sendable, Equatable {
     public var address: String
@@ -36,9 +37,12 @@ actor Prober {
     private var gatewayLoss = LossWindow()
     private var internetLoss = LossWindow()
     private var loop: Task<Void, Never>?
+    private let recorder: HistoryRecorder?
 
-    init(interval: TimeInterval = 5, internetTarget: String = "1.1.1.1", thresholds: NetworkThresholds = NetworkThresholds()) {
+    init(interval: TimeInterval = 5, internetTarget: String = "1.1.1.1", thresholds: NetworkThresholds = NetworkThresholds(),
+         recorder: HistoryRecorder? = nil) {
         self.interval = interval
+        self.recorder = recorder
         self.internetTarget = internetTarget
         self.thresholds = thresholds
     }
@@ -49,6 +53,7 @@ actor Prober {
             while !Task.isCancelled {
                 guard let self else { return }
                 let reading = await self.probe()
+                await self.recorder?.record(HistorySamples.from(reading, at: Date()))
                 await publish(reading)
                 let interval = self.interval
                 try? await Task.sleep(for: .seconds(interval), tolerance: .seconds(interval * 0.1))

@@ -59,7 +59,7 @@ public struct NetworkCollector: Sendable {
         if primary == nil || now - primary!.resolvedAt >= Self.primaryRefreshInterval {
             primary = (Self.primaryInterface(), now)
         }
-        guard let name = primary?.name, let counters = Self.counters()[name] else {
+        guard let name = primary?.name, let counters = Self.counters(only: name)[name] else {
             previous = nil
             return NetworkReading(interface: nil, downBytesPerSec: 0, upBytesPerSec: 0)
         }
@@ -88,7 +88,10 @@ public struct NetworkCollector: Sendable {
     }
 
     /// 64-bit per-interface byte counters via NET_RT_IFLIST2 (getifaddrs only exposes 32-bit ones, which wrap at 4 GB).
-    public static func counters() -> [String: InterfaceCounters] {
+    /// - Parameter only: restrict to one interface; others are skipped without a name lookup.
+    public static func counters(only name: String? = nil) -> [String: InterfaceCounters] {
+        let wantedIndex = name.map { if_nametoindex($0) }
+        if wantedIndex == 0 { return [:] }
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]
         var length = 0
         guard sysctl(&mib, UInt32(mib.count), nil, &length, nil, 0) == 0, length > 0 else { return [:] }
@@ -101,7 +104,7 @@ public struct NetworkCollector: Sendable {
             while offset + MemoryLayout<if_msghdr>.size <= length {
                 let header = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
                 guard header.ifm_msglen > 0 else { break }
-                if Int32(header.ifm_type) == RTM_IFINFO2 {
+                if Int32(header.ifm_type) == RTM_IFINFO2, wantedIndex == nil || UInt32(header.ifm_index) == wantedIndex! {
                     let message = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
                     var nameBuffer = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
                     if if_indextoname(UInt32(message.ifm_index), &nameBuffer) != nil {

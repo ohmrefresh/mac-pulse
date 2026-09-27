@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import PulseCore
 import PulseCollectors
+import PulseStore
 
 /// Latest readings for the UI. Only fields present in a snapshot are replaced, so views
 /// observing slow metrics are not invalidated by fast ticks.
@@ -34,21 +35,33 @@ public final class LiveMetrics {
     @ObservationIgnored private var processListViewers = 0
 
     @ObservationIgnored private let sampler: Sampler
-    @ObservationIgnored private let prober = Prober()
+    @ObservationIgnored private let prober: Prober
+    /// Nil when history is disabled (tests) or the database could not be opened.
+    @ObservationIgnored public let recorder: HistoryRecorder?
+    public var history: HistoryStore? { recorder?.store }
 
-    public init(baseInterval: TimeInterval = 1) {
+    public init(baseInterval: TimeInterval = 1, recorder: HistoryRecorder? = nil) {
         processorName = CPUCollector.processorName()
-        sampler = Sampler(baseInterval: baseInterval)
+        self.recorder = recorder
+        sampler = Sampler(baseInterval: baseInterval, recorder: recorder)
+        prober = Prober(recorder: recorder)
         samplingInterval = baseInterval
     }
 
     public func start() {
         let sampler = self.sampler
         let prober = self.prober
+        let recorder = self.recorder
         Task { [weak self] in
             await sampler.start { snapshot in self?.apply(snapshot) }
             await prober.start { reading in self?.apply(reading) }
+            await recorder?.start()
         }
+    }
+
+    /// Writes buffered history. Call before quitting.
+    public func flushHistory() async {
+        await recorder?.flush()
     }
 
     public func stop() {

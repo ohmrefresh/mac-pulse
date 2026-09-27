@@ -3,6 +3,7 @@ import Observation
 import ServiceManagement
 import PulseCore
 import PulseEngine
+import PulseStore
 
 /// User preferences (PRD §14), persisted in UserDefaults. Setters push changes to the running engine.
 @MainActor
@@ -31,6 +32,22 @@ final class AppSettings {
     var lossWarningPercent: Double { didSet { save(lossWarningPercent, .lossWarningPercent); pushNetworkConfig() } }
     var lossCriticalPercent: Double { didSet { save(lossCriticalPercent, .lossCriticalPercent); pushNetworkConfig() } }
 
+    var retention: RetentionPreset {
+        didSet {
+            save(retention.rawValue, .retention)
+            let recorder = metrics.recorder, preset = retention
+            Task { await recorder?.setRetention(preset) }
+        }
+    }
+
+    var historyAvailable: Bool { metrics.recorder != nil }
+
+    /// Deletes all stored history (PRD §13). Returns an error message on failure.
+    func clearHistory() async -> String? {
+        guard let recorder = metrics.recorder else { return "History is not available." }
+        do { try await recorder.clear(); return nil } catch { return error.localizedDescription }
+    }
+
     /// Last launch-at-login error, shown in Settings instead of failing silently.
     private(set) var loginItemError: String?
 
@@ -51,12 +68,15 @@ final class AppSettings {
         latencyCriticalMs = defaults.object(forKey: Key.latencyCriticalMs.rawValue) as? Double ?? n.latencyMs.critical
         lossWarningPercent = defaults.object(forKey: Key.lossWarningPercent.rawValue) as? Double ?? n.packetLossPercent.warning
         lossCriticalPercent = defaults.object(forKey: Key.lossCriticalPercent.rawValue) as? Double ?? n.packetLossPercent.critical
+        retention = (defaults.object(forKey: Key.retention.rawValue) as? Int).flatMap(RetentionPreset.init(rawValue:)) ?? .thirtyDays
     }
 
     /// Push persisted values into the engine at launch (didSet does not run during init).
     func applyAtLaunch() {
         metrics.setSamplingInterval(samplingInterval)
         pushNetworkConfig()
+        let recorder = metrics.recorder, preset = retention
+        Task { await recorder?.setRetention(preset) }
         applyActivationPolicy()
         enableLaunchAtLoginOnFirstRun()
     }
@@ -115,7 +135,7 @@ final class AppSettings {
 
     private enum Key: String {
         case menuBarItems, samplingInterval, showDockIcon, pingTarget
-        case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent
+        case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention
         case didOfferLaunchAtLogin
     }
 

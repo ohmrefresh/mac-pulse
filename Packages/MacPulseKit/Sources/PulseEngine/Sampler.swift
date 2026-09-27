@@ -1,6 +1,7 @@
 import Foundation
 import PulseCore
 import PulseCollectors
+import PulseStore
 
 /// Readings produced on one tick. Nil fields were not due and must not overwrite prior values.
 public struct Snapshot: Sendable {
@@ -24,9 +25,11 @@ actor Sampler {
     private let thermal = ThermalCollector()
     private var processes = ProcessCollector()
     private var loop: Task<Void, Never>?
+    private let recorder: HistoryRecorder?
 
-    init(baseInterval: TimeInterval) {
+    init(baseInterval: TimeInterval, recorder: HistoryRecorder?) {
         cadence = Cadence(baseInterval: baseInterval)
+        self.recorder = recorder
     }
 
     func start(publish: @escaping @Sendable @MainActor (Snapshot) -> Void) {
@@ -35,6 +38,7 @@ actor Sampler {
             while !Task.isCancelled {
                 guard let self else { return }
                 let snapshot = await self.tick()
+                await self.record(snapshot)
                 await publish(snapshot)
                 let interval = await self.cadence.baseInterval
                 // Tolerance lets the OS coalesce wakeups with other timers (energy budget).
@@ -55,6 +59,15 @@ actor Sampler {
     /// Takes effect from the next sleep; the loop re-reads the interval every iteration.
     func setBaseInterval(_ interval: TimeInterval) {
         cadence.baseInterval = interval
+    }
+
+    private func record(_ snapshot: Snapshot) async {
+        guard let recorder else { return }
+        let now = Date()
+        await recorder.record(HistorySamples.from(snapshot, at: now))
+        if let processes = snapshot.processes {
+            await recorder.record(processes: HistorySamples.topProcesses(processes, at: now))
+        }
     }
 
     private func tick() -> Snapshot {
