@@ -12,6 +12,9 @@ public struct Snapshot: Sendable {
     public var battery: BatteryReading?
     public var thermal: ThermalState?
     public var processes: [ProcessRow]?
+    public var gpu: GPUReading?
+    public var sensors: SensorsReading?
+    public var peripheralBatteries: [PeripheralBattery]?
 }
 
 /// The single clock driving every collector, off the main thread.
@@ -24,6 +27,7 @@ actor Sampler {
     private let battery = BatteryCollector()
     private let thermal = ThermalCollector()
     private var processes = ProcessCollector()
+    private let sensors = SensorsCollector()
     private var loop: Task<Void, Never>?
     private let recorder: HistoryRecorder?
 
@@ -56,6 +60,10 @@ actor Sampler {
         cadence.processesVisible = visible
     }
 
+    func setSensorsVisible(_ visible: Bool) {
+        cadence.sensorsVisible = visible
+    }
+
     /// Takes effect from the next sleep; the loop re-reads the interval every iteration.
     func setBaseInterval(_ interval: TimeInterval) {
         cadence.baseInterval = interval
@@ -82,9 +90,14 @@ actor Sampler {
         if due.contains(.power) {
             s.battery = battery.sample()
             s.thermal = thermal.sample()
+            s.gpu = GPUCollector.sample()
         }
         if due.contains(.disk) {
             s.disk = disk.sample()
+            s.peripheralBatteries = PeripheralBatteryCollector.sample()
+        }
+        if due.contains(.sensors) {
+            s.sensors = sensors.sample()
         }
         if due.contains(.processes) {
             s.processes = processes.sample(refreshPrivileged: due.contains(.privilegedProcesses), now: now)

@@ -34,4 +34,26 @@ struct CollectorBenchmarks {
         print(String(format: "BENCH processes direct %.3f ms, with ps %.3f ms (wall, mostly waiting on child)", direct, withPS))
         #expect(direct < 15)
     }
+
+    @Test func phase34Collectors() {
+        let sensors = SensorsCollector()
+        let costs = [
+            ("sensors (HID + SMC)", averageMs(20) { _ = sensors.sample() }),
+            ("gpu", averageMs(50) { _ = GPUCollector.sample() }),
+            ("peripheral batteries", averageMs(20) { _ = PeripheralBatteryCollector.sample() }),
+            ("network config", averageMs(50) { _ = NetworkConfigCollector.sample() }),
+            ("listening ports (netstat)", averageMs(10) { _ = ListeningPortsCollector.sample() }),
+        ]
+        for (name, ms) in costs { print(String(format: "BENCH %@ %.3f ms", name, ms)) }
+    }
+
+    @Test func sensorsSplit() {
+        let hid = HIDTemperatures()
+        let smc = SMCConnection()
+        print(String(format: "BENCH hid read %.3f ms", averageMs(10) { _ = hid?.read() }))
+        print(String(format: "BENCH smc fans %.3f ms", averageMs(10) {
+            let n = smc?.readUInt8("FNum") ?? 0
+            for i in 0..<Int(n) { _ = smc?.readFloat("F\(i)Ac"); _ = smc?.readFloat("F\(i)Mn"); _ = smc?.readFloat("F\(i)Mx") }
+        }))
+    }
 }

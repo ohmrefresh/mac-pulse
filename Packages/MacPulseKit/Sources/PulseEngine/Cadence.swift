@@ -10,12 +10,15 @@ public enum SamplingJob: CaseIterable, Sendable, Hashable {
     case processes
     /// Root/system processes via `ps`.
     case privilegedProcesses
+    /// Temperatures and fans (private APIs, ~20 ms per read).
+    case sensors
 }
 
 /// Decides which jobs are due on a tick. Pure so the schedule is testable without a clock.
 public struct Cadence: Sendable {
     public var baseInterval: TimeInterval
     public var processesVisible = false
+    public var sensorsVisible = false
     private var lastRun: [SamplingJob: TimeInterval] = [:]
 
     public init(baseInterval: TimeInterval = 1) {
@@ -29,6 +32,7 @@ public struct Cadence: Sendable {
         case .disk: 60
         case .processes: processesVisible ? baseInterval : 5
         case .privilegedProcesses: 5
+        case .sensors: sensorsVisible ? 5 : 60
         }
     }
 

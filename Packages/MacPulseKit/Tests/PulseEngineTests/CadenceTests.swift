@@ -33,6 +33,15 @@ import Testing
         #expect(c[.privilegedProcesses] == 3)   // still ps only every 5 s
     }
 
+    @Test func sensorsEveryMinuteUnlessVisible() {
+        #expect(counts(seconds: 120, visible: false)[.sensors] == 3)     // 0, 60, 120
+        var cadence = Cadence(baseInterval: 1)
+        cadence.sensorsVisible = true
+        var n = 0
+        for t in 0...10 where cadence.due(at: Double(t)).contains(.sensors) { n += 1 }
+        #expect(n == 3)                                                  // 0, 5, 10
+    }
+
     @Test func toleratesTimerJitter() {
         var cadence = Cadence(baseInterval: 1)
         _ = cadence.due(at: 0)

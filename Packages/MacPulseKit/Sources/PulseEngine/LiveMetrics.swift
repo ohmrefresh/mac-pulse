@@ -18,6 +18,11 @@ public final class LiveMetrics {
     public private(set) var thermal: ThermalState?
     public private(set) var processes: [ProcessRow] = []
     public private(set) var networkHealth: NetworkHealthReading?
+    public private(set) var gpu: GPUReading?
+    /// Nil until the first read; empty when the private sensor APIs are unavailable (ADR 0002).
+    public private(set) var sensors: SensorsReading?
+    public private(set) var peripheralBatteries: [PeripheralBattery] = []
+    public private(set) var developer = DeveloperSnapshot()
     public let processorName: String?
 
     public private(set) var samplingInterval: TimeInterval
@@ -33,6 +38,9 @@ public final class LiveMetrics {
     public private(set) var thermalChanges: [ThermalChange] = []
 
     @ObservationIgnored private var processListViewers = 0
+    @ObservationIgnored private var sensorViewers = 0
+    @ObservationIgnored private var developerViewers = 0
+    @ObservationIgnored private let developerMonitor = DeveloperMonitor()
 
     // MARK: Alerts and timeline
     public private(set) var alertRules: [AlertRule] = []
@@ -67,6 +75,7 @@ public final class LiveMetrics {
         Task { [weak self] in
             await sampler.start { snapshot in self?.apply(snapshot) }
             await prober.start { reading in self?.apply(reading) }
+            await self?.developerMonitor.start { snapshot in self?.apply(snapshot) }
             await recorder?.start()
         }
     }
@@ -79,9 +88,11 @@ public final class LiveMetrics {
     public func stop() {
         let sampler = self.sampler
         let prober = self.prober
+        let developerMonitor = self.developerMonitor
         Task {
             await sampler.stop()
             await prober.stop()
+            await developerMonitor.stop()
         }
     }
 
@@ -96,6 +107,43 @@ public final class LiveMetrics {
         guard processListViewers > 0 else { return }
         processListViewers -= 1
         if processListViewers == 0 { setProcessesVisible(false) }
+    }
+
+    /// Docker stats and listening ports are only collected while the Developer view is visible.
+    public func developerAppeared() {
+        developerViewers += 1
+        if developerViewers == 1 { let m = developerMonitor; Task { await m.setVisible(true) } }
+    }
+
+    public func developerDisappeared() {
+        guard developerViewers > 0 else { return }
+        developerViewers -= 1
+        if developerViewers == 0 { let m = developerMonitor; Task { await m.setVisible(false) } }
+    }
+
+    /// Decision D1: off by default; contacts 1.1.1.1 only on network change or every 30 min.
+    public func setPublicIPEnabled(_ enabled: Bool) {
+        let m = developerMonitor
+        Task { await m.setPublicIPEnabled(enabled) }
+    }
+
+    func apply(_ snapshot: DeveloperSnapshot) {
+        for event in DeveloperMonitor.containerEvents(old: developer.containers, new: snapshot.containers, at: Date()) {
+            post(event)
+        }
+        if snapshot != developer { developer = snapshot }
+    }
+
+    /// Temperatures refresh every 5 s while any view showing them is on screen, else every 60 s.
+    public func sensorsAppeared() {
+        sensorViewers += 1
+        if sensorViewers == 1 { let sampler = self.sampler; Task { await sampler.setSensorsVisible(true) } }
+    }
+
+    public func sensorsDisappeared() {
+        guard sensorViewers > 0 else { return }
+        sensorViewers -= 1
+        if sensorViewers == 0 { let sampler = self.sampler; Task { await sampler.setSensorsVisible(false) } }
     }
 
     private func setProcessesVisible(_ visible: Bool) {
@@ -210,6 +258,9 @@ public final class LiveMetrics {
             thermal = v
         }
         if let v = s.processes { processes = v }
+        if let v = s.gpu { gpu = v }
+        if let v = s.sensors { sensors = v }
+        if let v = s.peripheralBatteries { peripheralBatteries = v }
         let now = Date()
         for event in timeline.observe(s, at: now) { post(event) }
         evaluateAlerts(Self.alertValues(s), at: now)

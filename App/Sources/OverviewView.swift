@@ -110,9 +110,17 @@ struct OverviewView: View {
     }
 
     private var thermalCard: some View {
-        Card(title: "Thermal", symbol: "thermometer.medium", health: metrics.thermal?.health) {
-            BigValue(metrics.thermal.map(Format.thermal))
-            Text("macOS thermal state").font(.caption).foregroundStyle(.secondary)
+        Card(title: "Temperature", symbol: "thermometer.medium", health: metrics.thermal?.health) {
+            BigValue(metrics.sensors?.cpuCelsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal))
+            Text(metrics.sensors?.cpuCelsius != nil ? "CPU · thermal state \(metrics.thermal.map(Format.thermal) ?? "–")"
+                                                     : "macOS thermal state").font(.caption).foregroundStyle(.secondary)
+            if let s = metrics.sensors {
+                Detail("SSD", s.ssdCelsius.map(Format.celsius))
+                if let fan = s.fans.max(by: { $0.rpm < $1.rpm }) {
+                    Detail("Fan", fan.rpm < 1 ? "Stopped" : "\(Int(fan.rpm.rounded())) rpm")
+                }
+            }
+            if let gpu = metrics.gpu { Detail("GPU load", Format.percent(gpu.utilizationPercent)) }
         }
     }
 }

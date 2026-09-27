@@ -6,6 +6,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
     case performance = "Performance"
     case network = "Network"
     case processes = "Processes"
+    case developer = "Developer"
     case storage = "Storage"
     case battery = "Battery"
     case sensors = "Sensors"
@@ -20,6 +21,7 @@ enum DashboardSection: String, CaseIterable, Identifiable {
         case .performance: "cpu"
         case .network: "arrow.up.arrow.down"
         case .processes: "list.bullet.rectangle"
+        case .developer: "hammer"
         case .storage: "internaldrive"
         case .battery: "battery.75percent"
         case .sensors: "thermometer.medium"
@@ -66,6 +68,7 @@ struct DashboardView: View {
             case .performance: PerformanceView(metrics: metrics)
             case .network: NetworkDetailView(metrics: metrics)
             case .processes: ProcessesView(metrics: metrics)
+            case .developer: DeveloperView(metrics: metrics, settings: settings)
             case .storage: StorageView(metrics: metrics)
             case .battery: BatteryView(metrics: metrics)
             case .sensors: SensorsView(metrics: metrics)

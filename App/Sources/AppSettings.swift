@@ -42,6 +42,11 @@ final class AppSettings {
 
     var historyAvailable: Bool { metrics.recorder != nil }
 
+    /// Decision D1: off by default.
+    var publicIPEnabled: Bool {
+        didSet { save(publicIPEnabled, .publicIPEnabled); metrics.setPublicIPEnabled(publicIPEnabled) }
+    }
+
     var alertRules: [AlertRule] {
         didSet {
             if let data = try? JSONEncoder().encode(alertRules) { save(data, .alertRules) }
@@ -83,6 +88,7 @@ final class AppSettings {
         lossWarningPercent = defaults.object(forKey: Key.lossWarningPercent.rawValue) as? Double ?? n.packetLossPercent.warning
         lossCriticalPercent = defaults.object(forKey: Key.lossCriticalPercent.rawValue) as? Double ?? n.packetLossPercent.critical
         retention = (defaults.object(forKey: Key.retention.rawValue) as? Int).flatMap(RetentionPreset.init(rawValue:)) ?? .thirtyDays
+        publicIPEnabled = defaults.bool(forKey: Key.publicIPEnabled.rawValue)
         alertRules = defaults.data(forKey: Key.alertRules.rawValue)
             .flatMap { try? JSONDecoder().decode([AlertRule].self, from: $0) } ?? AlertRule.templates
     }
@@ -91,6 +97,7 @@ final class AppSettings {
     func applyAtLaunch() {
         metrics.setSamplingInterval(samplingInterval)
         metrics.setAlertRules(alertRules)
+        metrics.setPublicIPEnabled(publicIPEnabled)
         pushNetworkConfig()
         let recorder = metrics.recorder, preset = retention
         Task { await recorder?.setRetention(preset) }
@@ -152,7 +159,7 @@ final class AppSettings {
 
     private enum Key: String {
         case menuBarItems, samplingInterval, showDockIcon, pingTarget
-        case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules
+        case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules, publicIPEnabled
         case didOfferLaunchAtLogin
     }
 

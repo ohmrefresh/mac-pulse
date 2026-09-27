@@ -18,6 +18,11 @@ public enum MetricKind: String, Sendable, Codable, CaseIterable {
     case batteryPercent = "battery"
     /// ThermalState raw value (0 nominal … 3 critical).
     case thermalState = "thermal"
+    case gpuPercent = "gpu"
+    /// Hottest CPU die, °C (private API, ADR 0002).
+    case cpuTemperatureC = "cpu_temp"
+    /// Fastest fan, RPM (private API, ADR 0002).
+    case fanRPM = "fan_rpm"
 }
 
 public struct MetricSample: Sendable, Codable, Equatable {

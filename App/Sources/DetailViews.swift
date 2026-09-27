@@ -31,6 +31,20 @@ struct PerformanceView: View {
                         PerCoreBars(values: cores)
                     }
                 }
+                Section2(title: "GPU", subtitle: metrics.gpu.map { "\(Format.percent($0.utilizationPercent)) now" }) {
+                    if range == .live {
+                        if let g = metrics.gpu {
+                            ProgressView(value: g.utilizationPercent, total: 100)
+                            if let mem = g.memoryInUseBytes { Text("GPU memory in use: \(Format.memory(mem))").font(.caption).foregroundStyle(.secondary) }
+                        } else {
+                            Text("No GPU data").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        HistoryChart(history: metrics.history, lines: [.init(kind: .gpuPercent, name: "GPU")],
+                                     range: range, maximum: 100, format: { "\(Int($0))%" })
+                            .frame(height: 140)
+                    }
+                }
                 Section2(title: "Memory", subtitle: metrics.memory.map { "\(Format.memory($0.totalBytes)) installed" }) {
                     Group {
                         if range == .live {
@@ -185,15 +199,31 @@ struct BatteryView: View {
                         KeyValue("Cycle count", b.cycleCount.map(String.init) ?? "--")
                         KeyValue("Maximum capacity", b.maximumCapacityPercent.map(Format.percent) ?? "--")
                     }
+                    peripherals
                     Spacer()
                 }
                 .padding(20)
             } else {
-                ContentUnavailableView("No battery", systemImage: "battery.0percent",
-                                       description: Text("This Mac has no internal battery."))
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("This Mac has no internal battery.").foregroundStyle(.secondary)
+                    peripherals
+                    Spacer()
+                }
+                .padding(20)
             }
         }
         .navigationTitle("Battery")
+    }
+
+    @ViewBuilder private var peripherals: some View {
+        Text("Accessories").font(.headline).padding(.top, 8)
+        if metrics.peripheralBatteries.isEmpty {
+            Text("No Bluetooth accessories reporting a battery level.").foregroundStyle(.secondary)
+        } else {
+            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
+                ForEach(metrics.peripheralBatteries) { KeyValue($0.name, "\($0.percent)%") }
+            }
+        }
     }
 }
 
@@ -201,31 +231,60 @@ struct SensorsView: View {
     let metrics: LiveMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Text(metrics.thermal.map(Format.thermal) ?? "--").font(.largeTitle.weight(.semibold))
-                if let t = metrics.thermal { HealthBadge(level: t.health) }
-            }
-            Text("macOS thermal state. Temperature readings in °C are planned for a later release.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Recent changes").font(.headline).padding(.top, 8)
-            if metrics.thermalChanges.isEmpty {
-                Text("No changes since launch.").foregroundStyle(.secondary)
-            } else {
-                List(metrics.thermalChanges.reversed()) { change in
-                    HStack {
-                        Text(change.date, style: .time).monospacedDigit().foregroundStyle(.secondary)
-                        Text(Format.thermal(change.state))
-                        Spacer()
-                        HealthBadge(level: change.state.health)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(spacing: 12) {
+                    Text(metrics.thermal.map(Format.thermal) ?? "--").font(.largeTitle.weight(.semibold))
+                    if let t = metrics.thermal { HealthBadge(level: t.health) }
+                    Spacer()
+                }
+                Text("macOS thermal state — what drives throttling, alerts and health.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                if let s = metrics.sensors, !s.isEmpty {
+                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
+                        KeyValue("CPU", s.cpuCelsius.map(Format.celsius) ?? "–")
+                        KeyValue("SSD", s.ssdCelsius.map(Format.celsius) ?? "–")
+                        KeyValue("Battery", s.batteryCelsius.map(Format.celsius) ?? "–")
+                        ForEach(s.fans) { fan in
+                            KeyValue("Fan \(fan.index + 1)", fan.rpm < 1 ? "Stopped" : "\(Int(fan.rpm.rounded())) rpm"
+                                     + (fan.maxRPM.map { " / \(Int($0)) max" } ?? ""))
+                        }
+                        if let gpu = metrics.gpu { KeyValue("GPU load", Format.percent(gpu.utilizationPercent)) }
+                    }
+                    DisclosureGroup("All sensors (\(s.sensors.count))") {
+                        Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 4) {
+                            ForEach(s.sensors) { KeyValue($0.name, Format.celsius($0.celsius)) }
+                        }
+                        .padding(.top, 6)
+                    }
+                    Text("Temperatures and fans use undocumented macOS interfaces and may be unavailable after a macOS update.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if metrics.sensors != nil {
+                    Text("Temperature sensors are not available on this Mac or macOS version.").foregroundStyle(.secondary)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+
+                Text("Thermal state changes").font(.headline).padding(.top, 8)
+                if metrics.thermalChanges.isEmpty {
+                    Text("No changes since launch.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(metrics.thermalChanges.reversed()) { change in
+                        HStack {
+                            Text(change.date, style: .time).monospacedDigit().foregroundStyle(.secondary)
+                            Text(Format.thermal(change.state))
+                            Spacer()
+                            HealthBadge(level: change.state.health)
+                        }
                     }
                 }
-                .listStyle(.inset)
             }
-            Spacer()
+            .padding(20)
         }
-        .padding(20)
         .navigationTitle("Sensors")
+        .onAppear(perform: metrics.sensorsAppeared)
+        .onDisappear(perform: metrics.sensorsDisappeared)
     }
 }
 

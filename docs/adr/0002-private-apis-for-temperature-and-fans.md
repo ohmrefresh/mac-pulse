@@ -1,0 +1,3 @@
+# Use private APIs for temperatures and fan speed, failing soft
+
+macOS has no public API for sensor temperatures or fan speed on Apple Silicon, so Phase 4 reads them through private interfaces (`IOHIDEventSystemClient` for temperature sensors, the `AppleSMC` user client for fans) — the same approach Stats and iStat Menus use, and possible only because we ship unsandboxed (ADR 0001). These interfaces are undocumented and can change or disappear in any macOS update, so they are on by default but isolated in their own collector: any failure yields "Unknown" rather than a crash or a wrong number, and nothing else (health, alerts, diagnostics) depends on them — thermal health keeps using the public `ProcessInfo.thermalState`.

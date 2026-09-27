@@ -54,6 +54,9 @@ struct SettingsView: View {
             LabeledContent("Latency critical") { stepper($settings.latencyCriticalMs, unit: "ms", step: 10, range: 10...5000) }
             LabeledContent("Packet loss warning") { stepper($settings.lossWarningPercent, unit: "%", step: 1, range: 1...100) }
             LabeledContent("Packet loss critical") { stepper($settings.lossCriticalPercent, unit: "%", step: 1, range: 1...100) }
+            Toggle("Look up public IP address", isOn: $settings.publicIPEnabled)
+            Text("Asks 1.1.1.1 (Cloudflare) when the network changes and at most every 30 minutes.")
+                .font(.caption).foregroundStyle(.secondary)
             Text("Probes run every 5 seconds against the gateway and the ping host.")
                 .font(.caption).foregroundStyle(.secondary)
         }

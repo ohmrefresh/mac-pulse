@@ -19,6 +19,9 @@ enum HistorySamples {
         add(.diskFreeBytes, s.disk.map { Double($0.availableBytes) })
         add(.batteryPercent, s.battery?.percent)
         add(.thermalState, s.thermal.map { Double($0.rawValue) })
+        add(.gpuPercent, s.gpu?.utilizationPercent)
+        add(.cpuTemperatureC, s.sensors?.cpuCelsius)
+        add(.fanRPM, s.sensors?.fans.map(\.rpm).max())
         return out
     }
 

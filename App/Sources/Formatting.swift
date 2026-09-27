@@ -5,6 +5,8 @@ import PulseCollectors
 enum Format {
     static func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
 
+    static func celsius(_ value: Double) -> String { "\(Int(value.rounded()))°C" }
+
     static func bytes(_ value: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
     }
