@@ -131,6 +131,29 @@ import PulseCollectors
         #expect(g.observe(processes(calm + [row(2, "Docker", cpu: 60)]), at: at(35)).map(\.title) == ["Docker CPU increased"])
     }
 
+    /// The flood this rule exists to stop: a process that stays busy while *other* processes
+    /// spike around it kept leaving the top N and being re-announced on the way back, so one
+    /// busy app filled the timeline with the same line every half minute.
+    @Test func hogStaysAnnouncedWhileHotEvenWhenOutranked() {
+        var g = TimelineGenerator()
+        let calm = [row(1, "Finder", cpu: 1)]
+        _ = g.observe(processes(calm + [row(2, "Notes", cpu: 60)]), at: at(0))
+        #expect(g.observe(processes(calm + [row(2, "Notes", cpu: 60)]), at: at(10))
+                    .map(\.title) == ["Notes CPU increased"])
+
+        // Three busier processes outrank Notes. It never cools down.
+        let busier = [row(3, "Compiler", cpu: 95), row(4, "Indexer", cpu: 90), row(5, "Encoder", cpu: 85)]
+        _ = g.observe(processes(calm + busier + [row(2, "Notes", cpu: 60)]), at: at(20))
+        _ = g.observe(processes(calm + busier + [row(2, "Notes", cpu: 60)]), at: at(35))
+
+        // They finish; Notes is top again. It was hot the whole time, so it is not news — not on
+        // the tick it returns, and not after another hold has elapsed.
+        let back = g.observe(processes(calm + [row(2, "Notes", cpu: 60)]), at: at(50))
+        #expect(!back.map(\.title).contains("Notes CPU increased"))
+        let later = g.observe(processes(calm + [row(2, "Notes", cpu: 60)]), at: at(65))
+        #expect(!later.map(\.title).contains("Notes CPU increased"))
+    }
+
     @Test func memoryGrowthWithinWindow() {
         var g = TimelineGenerator()
         let gb: UInt64 = 1 << 30

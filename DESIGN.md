@@ -200,6 +200,11 @@ Capsule, 8×2px padding, caption weight medium, fill in the Health tint at 15%. 
 
 Its ink is **not** that same tint. Ink and fill drawn from one system colour measure under 2:1 in Light — the label disappears into its own capsule. The ink is the tint re-lit along OKLCH lightness until it clears 4.5:1 against the composited fill (`Color.readableInk(on:minimum:)`), which leaves Dark untouched because the system tint already clears the floor there. Status *marks* — the timeline dot, the severity glyphs, the thermal bands — take the same treatment at the 3:1 non-text floor via `HealthLevel.markTint`. Both floors are asserted by `StatusVocabularyTests`, through the real appearances, so a system-colour change fails the build.
 
+### Timeline rows
+Consecutive events saying the same thing about the same metric collapse into one row: the title, then "6 times · 23:30–23:31" where a single occurrence would show its own detail. A process that stays busy is one fact, and repeating it every time the reading re-armed buried the structural events between the copies — a memory-pressure change reading like more of the same.
+
+This is a display decision, not a filter. Every event is still recorded, still counted in the header ("51 events"), still exported and still available to Diagnostics; a narrower range or a category filter shows them individually. The engine's own rule is the other half: a hog keeps its entry while it stays above the bar, so re-announcing needs a real cool-down first, not merely a busier neighbour pushing it out of the top three.
+
 ### Page lead
 Six cards of equal weight tell the user what is happening and leave them to compare. Above the grid, and only when something is not healthy, Overview states the worst reading and when it began: `SeverityMark` + "Memory pressure has been Critical since 23:15 · 4 minutes ago", with a small bordered button into the Timeline.
 

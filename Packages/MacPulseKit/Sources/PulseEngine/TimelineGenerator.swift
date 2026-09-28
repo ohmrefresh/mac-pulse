@@ -157,10 +157,15 @@ public struct TimelineGenerator: Sendable {
     private mutating func observeProcesses(_ rows: [ProcessRow], at now: Date) -> [TimelineEvent] {
         var events: [TimelineEvent] = []
 
-        let top = rows.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(config.processTopN)
-            .filter { $0.cpuPercent > config.processCPUPercent }
-        let topPIDs = Set(top.map(\.pid))
-        hogs = hogs.filter { topPIDs.contains($0.key) }            // left the top: may be announced again later
+        // Tracking follows *hotness*, announcing follows rank. Keyed on rank, a process that
+        // stayed busy while others spiked around it dropped out of the top N, lost its entry, and
+        // was announced again on the way back — one busy app filling the timeline with one line.
+        // An entry is forgotten only when the process cools below the bar, so the next
+        // announcement needs a real recovery first.
+        let hot = rows.filter { $0.cpuPercent > config.processCPUPercent }
+        let hotPIDs = Set(hot.map(\.pid))
+        hogs = hogs.filter { hotPIDs.contains($0.key) }            // cooled off: may be announced again later
+        let top = hot.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(config.processTopN)
         for row in top {
             var hog = hogs[row.pid] ?? (since: now, announced: false, name: row.name)
             if !hog.announced, now.timeIntervalSince(hog.since) >= config.processHold {

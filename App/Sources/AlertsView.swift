@@ -156,7 +156,13 @@ private struct RuleRow: View {
 }
 
 struct EventRow: View {
+    /// The most recent event of the run; its time is the row's time.
     let event: TimelineEvent
+    /// How many consecutive identical events this row stands for, and when the run began. One
+    /// occurrence reads as itself; a run reads as a count and a span, because "the same thing,
+    /// still happening" is one fact, not eight.
+    var repeats: Int = 1
+    var runStarted: Date?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -165,7 +171,7 @@ struct EventRow: View {
                 .monospacedDigit().foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title)
-                if let detail = event.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
             }
         }
         // Otherwise the mark, the clock and the text are read as three unrelated elements.
@@ -173,9 +179,18 @@ struct EventRow: View {
         .accessibilityLabel(spoken)
     }
 
+    /// A run replaces the single occurrence's detail: the last reading of eight is not the story,
+    /// the repetition is.
+    private var detail: String? {
+        guard repeats > 1 else { return event.detail }
+        guard let runStarted else { return "\(repeats) times" }
+        return "\(repeats) times · \(runStarted.formatted(date: .omitted, time: .shortened))"
+            + "–\(event.time.formatted(date: .omitted, time: .shortened))"
+    }
+
     private var spoken: String {
         let time = event.time.formatted(date: .omitted, time: .standard)
-        return [Format.health(event.severity), time, event.title, event.detail]
+        return [Format.health(event.severity), time, event.title, detail]
             .compactMap { $0 }
             .joined(separator: ", ")
     }

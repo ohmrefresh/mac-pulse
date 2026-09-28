@@ -45,8 +45,11 @@ struct TimelineSectionView: View {
                 ContentUnavailableView("No events", systemImage: "clock",
                                        description: Text("Nothing changed in this range."))
             } else {
-                List(events) { EventRow(event: $0).padding(.vertical, 2) }
-                    .listStyle(.inset)
+                List(runs) { run in
+                    EventRow(event: run.latest, repeats: run.count, runStarted: run.started)
+                        .padding(.vertical, 2)
+                }
+                .listStyle(.inset)
             }
         }
         .task(id: range) { await load() }
@@ -60,6 +63,34 @@ struct TimelineSectionView: View {
         return (live + stored)
             .filter { category == nil || $0.category == category }
             .sorted { $0.time > $1.time }
+    }
+
+    /// Consecutive events that say the same thing about the same metric, as one row.
+    ///
+    /// A process that stays busy is one fact; the log used to repeat it every time the reading
+    /// re-armed, and the repetition buried the structural events — a memory-pressure change sat
+    /// between two identical CPU lines and read like more of the same. Collapsing runs is a
+    /// display decision: every event is still recorded, still exported, still counted in the
+    /// header, and a filter or a narrower range shows them individually.
+    private struct Run: Identifiable {
+        let latest: TimelineEvent
+        let started: Date?
+        let count: Int
+        var id: UUID { latest.id }
+    }
+
+    private var runs: [Run] {
+        var runs: [Run] = []
+        for event in events {
+            // `events` is newest first, so the run's first element is its latest occurrence.
+            if let last = runs.last, last.latest.category == event.category,
+               last.latest.title == event.title, last.latest.severity == event.severity {
+                runs[runs.count - 1] = Run(latest: last.latest, started: event.time, count: last.count + 1)
+            } else {
+                runs.append(Run(latest: event, started: nil, count: 1))
+            }
+        }
+        return runs
     }
 
     private func load() async {
