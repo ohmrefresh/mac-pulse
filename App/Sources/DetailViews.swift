@@ -195,7 +195,8 @@ struct PerformanceView: View {
 
     private var cpuRows: [StatRail.Row] {
         let topology = metrics.cpuTopology
-        return [
+        // Appended into one typed array: joining `.init` literals with `+` is too much for CI's type checker.
+        var rows: [StatRail.Row] = [
             .init(label: "Total usage", value: metrics.cpu.map { Format.percent($0.totalPercent) }),
             .init(label: "Current frequency", value: metrics.frequency?.cpuCurrentHz.map(Format.frequency)),
             // Apple Silicon reports a ceiling through IOReport; Intel publishes one through sysctl.
@@ -203,13 +204,14 @@ struct PerformanceView: View {
                   value: (metrics.frequency?.cpuMaxHz ?? topology.maxFrequencyHz).map(Format.frequency)),
         ]
         // One row per cluster, labelled the way the kernel names it (e.g. "Super", "Performance").
-        + topology.clusters.map { .init(label: "Cores (\($0.name))", value: "\($0.logicalCount)") }
-        + [
+        rows += topology.clusters.map { StatRail.Row(label: "Cores (\($0.name))", value: "\($0.logicalCount)") }
+        rows += [
             .init(label: "Logical processors", value: topology.logicalCount.map(String.init)),
             .init(label: "Load average (1m)", value: metrics.loadAverage.map { Format.load($0.oneMinute) }),
             .init(label: "Load average (5m)", value: metrics.loadAverage.map { Format.load($0.fiveMinutes) }),
             .init(label: "Uptime", value: metrics.uptime.map(Format.uptime)),
         ]
+        return rows
     }
 
     // MARK: GPU
