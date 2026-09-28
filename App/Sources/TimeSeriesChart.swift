@@ -30,41 +30,10 @@ struct TimeSeriesChart: View {
 
     var body: some View {
         let plotted = Self.fitted(series, interval: interval)
+        // Each part is its own builder: as one `Chart { }` expression it is too much for CI's type checker.
         return Chart {
-            ForEach(plotted.series) { s in
-                ForEach(Array(s.values.enumerated()), id: \.offset) { index, value in
-                    if !value.isNaN {
-                        let x = -Double(s.values.count - 1 - index) * plotted.interval
-                        if stacked {
-                            AreaMark(x: .value("Seconds ago", x), y: .value(s.name, value))
-                                .foregroundStyle(by: .value("Series", s.name))
-                        } else {
-                            if series.count == 1 {
-                                AreaMark(x: .value("Seconds ago", x), y: .value(s.name, value))
-                                    .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.3), s.tint.opacity(0.02)],
-                                                                    startPoint: .top, endPoint: .bottom))
-                            }
-                            LineMark(x: .value("Seconds ago", x), y: .value(s.name, value),
-                                     series: .value("Series", s.name))
-                                .foregroundStyle(by: .value("Series", s.name))
-                                .lineStyle(StrokeStyle(lineWidth: emphasis(s.name)))
-                        }
-                    }
-                }
-            }
-            // Shades of one hue cannot reach 3:1 against each other, so each band edge is drawn in
-            // the surface color: the boundary is identifiable even where two fills sit close.
-            ForEach(Array((stacked ? Self.boundaries(plotted.series) : []).enumerated()), id: \.offset) { band, line in
-                ForEach(Array(line.enumerated()), id: \.offset) { index, value in
-                    if !value.isNaN {
-                        LineMark(x: .value("Seconds ago", -Double(line.count - 1 - index) * plotted.interval),
-                                 y: .value("Boundary", value),
-                                 series: .value("Series", "boundary-\(band)"))
-                            .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                            .lineStyle(StrokeStyle(lineWidth: 1))
-                    }
-                }
-            }
+            seriesMarks(plotted.series, interval: plotted.interval)
+            boundaryMarks(stacked ? Self.boundaries(plotted.series) : [], interval: plotted.interval)
         }
         .chartForegroundStyleScale(domain: series.map(\.name), range: series.map(\.tint))
         .chartYScale(domain: 0...yTop)
@@ -88,6 +57,48 @@ struct TimeSeriesChart: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? series.map(\.name).joined(separator: ", "))
         .accessibilityValue(summary)
+    }
+
+    @ChartContentBuilder
+    private func seriesMarks(_ plotted: [Series], interval: Double) -> some ChartContent {
+        ForEach(plotted) { s in
+            ForEach(Array(s.values.enumerated()), id: \.offset) { index, value in
+                if !value.isNaN {
+                    let x = -Double(s.values.count - 1 - index) * interval
+                    if stacked {
+                        AreaMark(x: .value("Seconds ago", x), y: .value(s.name, value))
+                            .foregroundStyle(by: .value("Series", s.name))
+                    } else {
+                        if series.count == 1 {
+                            AreaMark(x: .value("Seconds ago", x), y: .value(s.name, value))
+                                .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.3), s.tint.opacity(0.02)],
+                                                                startPoint: .top, endPoint: .bottom))
+                        }
+                        LineMark(x: .value("Seconds ago", x), y: .value(s.name, value),
+                                 series: .value("Series", s.name))
+                            .foregroundStyle(by: .value("Series", s.name))
+                            .lineStyle(StrokeStyle(lineWidth: emphasis(s.name)))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shades of one hue cannot reach 3:1 against each other, so each band edge is drawn in
+    /// the surface color: the boundary is identifiable even where two fills sit close.
+    @ChartContentBuilder
+    private func boundaryMarks(_ lines: [[Double]], interval: Double) -> some ChartContent {
+        ForEach(Array(lines.enumerated()), id: \.offset) { band, line in
+            ForEach(Array(line.enumerated()), id: \.offset) { index, value in
+                if !value.isNaN {
+                    let x = -Double(line.count - 1 - index) * interval
+                    LineMark(x: .value("Seconds ago", x), y: .value("Boundary", value),
+                             series: .value("Series", "boundary-\(band)"))
+                        .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                        .lineStyle(StrokeStyle(lineWidth: 1))
+                }
+            }
+        }
     }
 
     private var isEmpty: Bool {
