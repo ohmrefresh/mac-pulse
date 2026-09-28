@@ -150,3 +150,7 @@ Internal milestone covering PRD Phase 1. Dogfooded, not released.
 
 **v1.0**:
 First public release — PRD Phase 1 plus Phase 2.
+
+**Pre-release**:
+A 0.x version published before v1.0. Downloadable, but not the first public release.
+_Avoid_: beta, preview

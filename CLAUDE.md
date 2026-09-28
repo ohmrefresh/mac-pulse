@@ -36,7 +36,9 @@ scripts/soak.sh                 # 1 h
 DURATION=300 scripts/soak.sh    # quick check
 ```
 
-Packaging (ADR 0001): `scripts/package.sh` builds Release, re-signs with hardened runtime (and verifies the flag), and writes `dist/MacPulse-<version>.dmg`. Without `DEVELOPER_ID` it is an ad-hoc local test build; with `DEVELOPER_ID` + `NOTARY_PROFILE` it signs, notarizes and staples. Version comes from `MARKETING_VERSION` in `project.yml`.
+Packaging (ADR 0001): `scripts/package.sh` builds Release, re-signs with hardened runtime (and verifies the flag), and writes `dist/MacPulse-<version>.dmg`. Without `DEVELOPER_ID` it is an ad-hoc local test build; with `DEVELOPER_ID` + `NOTARY_PROFILE` it signs, notarizes and staples. Version comes from `MARKETING_VERSION` in `project.yml`; the build number is `git rev-list --count HEAD`.
+
+Releasing: bump `MARKETING_VERSION` and add a `## [X.Y.Z]` CHANGELOG section, push, then push tag `vX.Y.Z`. The `release` job in `ci.yml` runs after `test` passes, fails if the tag and `MARKETING_VERSION` differ or the CHANGELOG section is missing, packages, and publishes a GitHub Release (0.x as pre-release). It signs and notarizes only when secrets exist: `DEVELOPER_ID_P12_BASE64` + `DEVELOPER_ID_P12_PASSWORD` + `DEVELOPER_ID` (identity name) to sign; add `NOTARY_KEY_P8_BASE64` + `NOTARY_KEY_ID` + `NOTARY_ISSUER_ID` (App Store Connect API key) to notarize. Without them the DMG is ad-hoc signed and the notes say so.
 
 Opt-in live network test: `PULSE_NET=1 swift test --filter InternetPingTests`.
 
@@ -44,7 +46,7 @@ App sources: `App/Sources`; app-layer tests (`MacPulseTests`, hosted in the app)
 
 If Xcode reports that a package symbol doesn't exist when `swift test` sees it, its cached package build is stale: delete `.build/xcode-dev` (or the relevant derived-data folder) and rebuild.
 
-CI: `.github/workflows/ci.yml` (package tests, app build + tests, informational benchmarks). `LSUIElement` = true (menu-bar only, no Dock icon).
+CI: `.github/workflows/ci.yml` (package tests, app build + tests, informational benchmarks; on `v*` tags, a `release` job that publishes the DMG). `LSUIElement` = true (menu-bar only, no Dock icon).
 
 ## Architecture
 

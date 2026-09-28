@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.1.1"
     CURRENT_PROJECT_VERSION: "1"
 packages:
   MacPulseKit:
@@ -30,6 +30,9 @@ targets:
         LSUIElement: true
         CFBundleDisplayName: Mac Pulse
         LSApplicationCategoryType: public.app-category.utilities
+        # Without these XcodeGen writes 1.0 / 1 and MARKETING_VERSION never reaches the app.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ohmrefresh.macpulse

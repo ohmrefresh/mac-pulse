@@ -2,6 +2,21 @@
 
 Notable changes to Mac Pulse. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project is pre-1.0, so the public surface may still change between minor versions.
 
+## [0.1.1] — 2026-09-28
+
+First build published as a download. It is ad-hoc signed and not notarized, so macOS blocks the first launch: right-click Mac Pulse in Applications and choose Open.
+
+### Fixed
+
+- The app reports its real version and build number. 0.1.0 identified itself as version 1.0, build 1.
+- Builds with the Xcode on GitHub's macOS runners. Four expressions that newer compilers accept took the runner's Swift 6.2 too long to type-check: two test expectations, the CPU statistics list and the time-series chart.
+- The GPU model-name test is skipped, not failed, on a Mac with no GPU to read, such as a virtual machine.
+
+### Added
+
+- Pushing a version tag tests the app, builds the disk image and publishes it as a GitHub release, with that version's section of this changelog as the notes. Versions before 1.0 are marked as pre-releases.
+- The build number counts commits, so every release has a higher one than the last.
+
 ## [0.1.0] — 2026-09-28
 
 First pre-release. Everything below is new. No signed or notarized build is published yet — build from source.

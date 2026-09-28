@@ -22,10 +22,15 @@ fi
 VERSION="$(awk -F'"' '/MARKETING_VERSION/ { print $2; exit }' project.yml)"
 [[ -n "$VERSION" ]] || { echo "error: MARKETING_VERSION not found in project.yml" >&2; exit 1; }
 
-echo "==> Building Release $VERSION"
+# Commit count: rises with every commit on main and is reproducible from a tag. Sparkle orders
+# updates by this (CFBundleVersion), so it must never go down. project.yml keeps "1" for dev builds.
+BUILD_NUMBER="$(git rev-list --count HEAD)"
+
+echo "==> Building Release $VERSION ($BUILD_NUMBER)"
 xcodegen generate >/dev/null
 xcodebuild -project MacPulse.xcodeproj -scheme MacPulse -configuration Release \
-  -destination "generic/platform=macOS" -derivedDataPath "$BUILD" build >/dev/null
+  -destination "generic/platform=macOS" -derivedDataPath "$BUILD" \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" build >/dev/null
 APP="$BUILD/Build/Products/Release/MacPulse.app"
 
 # Re-sign explicitly so the hardened runtime and secure timestamp are guaranteed, whatever
@@ -37,7 +42,9 @@ else
   codesign --force --deep --options runtime --sign - "$APP"
 fi
 codesign --verify --deep --strict "$APP"
-if ! codesign -dv "$APP" 2>&1 | grep -q "flags=.*runtime"; then
+# Captured first: piping into `grep -q` under pipefail fails whenever grep exits before codesign finishes writing.
+SIGNATURE="$(codesign -dv "$APP" 2>&1)"
+if ! grep -q "flags=.*runtime" <<<"$SIGNATURE"; then
   echo "error: hardened runtime flag missing from signature" >&2
   exit 1
 fi
