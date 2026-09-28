@@ -5,8 +5,15 @@ import Testing
 @Suite struct DNSProbeTests {
     @Test func encodesQuery() throws {
         let p = try #require(DNSProbe.queryPacket(id: 0xBEEF, name: "apple.com"))
-        #expect(Array(p.prefix(12)) == [0xBE, 0xEF, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0])
-        #expect(Array(p.dropFirst(12)) == [5] + Array("apple".utf8) + [3] + Array("com".utf8) + [0, 0, 1, 0, 1])
+        // Built outside the `#expect` arguments: untyped literals inside the macro blow up the type checker.
+        let header: [UInt8] = [0xBE, 0xEF, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0]
+        var question: [UInt8] = [5]
+        question += "apple".utf8
+        question += [3]
+        question += "com".utf8
+        question += [0, 0, 1, 0, 1]                        // root label, then type A, class IN
+        #expect(Array(p.prefix(12)) == header)
+        #expect(Array(p.dropFirst(12)) == question)
     }
 
     @Test func rejectsInvalidNames() {

@@ -13,7 +13,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select newest Xcode
-        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          swift --version          # the runner's toolchain drifts; a type-check failure here needs to name it
 
       - name: Package tests
         run: swift test --package-path Packages/MacPulseKit

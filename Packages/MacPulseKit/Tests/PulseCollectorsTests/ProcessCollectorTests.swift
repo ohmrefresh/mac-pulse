@@ -25,12 +25,19 @@ import Testing
     }
 }
 
+/// Nanoseconds spelled the way `ps` spells a duration, so each expectation states the format it parses.
+/// Kept out of the `#expect` argument: literal arithmetic inside the macro is what the type checker chokes on.
+private func nanos(d: Int = 0, h: Int = 0, m: Int = 0, s: Double = 0) -> UInt64 {
+    let seconds = Double(d * 86_400 + h * 3_600 + m * 60) + s
+    return UInt64((seconds * 1e9).rounded())
+}
+
 @Suite struct PSParserTests {
     @Test func cpuTimeFormats() {
-        #expect(PSParser.cpuNanos("0:05.27") == 5_270_000_000)
-        #expect(PSParser.cpuNanos("123:45.50") == UInt64((123 * 60 + 45.5) * 1e9))
-        #expect(PSParser.cpuNanos("1:02:03") == UInt64((3600 + 2 * 60 + 3) * 1e9))
-        #expect(PSParser.cpuNanos("2-01:00:00") == UInt64((2 * 86_400 + 3600) * 1e9))
+        #expect(PSParser.cpuNanos("0:05.27") == nanos(s: 5.27))
+        #expect(PSParser.cpuNanos("123:45.50") == nanos(m: 123, s: 45.5))
+        #expect(PSParser.cpuNanos("1:02:03") == nanos(h: 1, m: 2, s: 3))
+        #expect(PSParser.cpuNanos("2-01:00:00") == nanos(d: 2, h: 1))
         #expect(PSParser.cpuNanos("garbage") == nil)
     }
 
@@ -46,7 +53,7 @@ import Testing
         #expect(entries[1].name == "WindowServer" && entries[1].uid == 88)
         #expect(entries[1].residentBytes == 4096 * 1024)
         #expect(entries[2].name == "Some App")
-        #expect(entries[0].elapsedNanos == UInt64((2 * 86_400 + 3 * 3600 + 4 * 60 + 5) * 1e9))
+        #expect(entries[0].elapsedNanos == nanos(d: 2, h: 3, m: 4, s: 5))
     }
 }
 
