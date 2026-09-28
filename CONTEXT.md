@@ -28,6 +28,20 @@ macOS's own four-step thermal scale (Nominal, Fair, Serious, Critical). The only
 drives Health Level.
 _Avoid_: temperature (°C readings are a separate, informational signal)
 
+## Interface
+
+**Menu Bar**:
+The always-visible status item and the segments it draws. The first of the three levels.
+_Avoid_: tray, menulet, menu bar app
+
+**Popover**:
+The transient panel that opens from the Menu Bar. The second level.
+_Avoid_: flyout, dropdown, panel, widget
+
+**Dashboard**:
+The full window with the section sidebar. The third level.
+_Avoid_: main window, app window, console
+
 ## Monitoring
 
 **Metric**:
