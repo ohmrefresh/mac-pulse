@@ -352,6 +352,16 @@ struct NetworkDetailView: View {
     let metrics: LiveMetrics
     @State private var range: ChartRange = .live
 
+    /// Four probes of one metric family: step the family's own tint. A second hue here reads
+    /// as a second metric, and orange and purple already mean Temperature and Memory.
+    /// Computed, so each render builds new (never-equal) tints — the chart keys by kind.
+    static var latencyLines: [HistoryChart.Line] {
+        [.init(kind: .latencyMs, name: "Internet", tint: MetricStyle.internet.shade(0, of: 4)),
+         .init(kind: .secondaryLatencyMs, name: "Second target", tint: MetricStyle.internet.shade(1, of: 4)),
+         .init(kind: .gatewayLatencyMs, name: "Gateway", tint: MetricStyle.internet.shade(2, of: 4)),
+         .init(kind: .dnsLatencyMs, name: "DNS", tint: MetricStyle.internet.shade(3, of: 4))]
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -378,14 +388,7 @@ struct NetworkDetailView: View {
                             TimeSeriesChart(series: [.init(name: "Latency", values: metrics.latencyHistory.values, tint: MetricStyle.internet.tint)],
                                             interval: 5, format: { "\(Int($0)) ms" })
                         } else {
-                            HistoryChart(history: metrics.history,
-                                         // Four probes of one metric family: step the family's own
-                                         // tint. A second hue here reads as a second metric, and
-                                         // orange and purple already mean Temperature and Memory.
-                                         lines: [.init(kind: .latencyMs, name: "Internet", tint: MetricStyle.internet.shade(0, of: 4)),
-                                                 .init(kind: .secondaryLatencyMs, name: "Second target", tint: MetricStyle.internet.shade(1, of: 4)),
-                                                 .init(kind: .gatewayLatencyMs, name: "Gateway", tint: MetricStyle.internet.shade(2, of: 4)),
-                                                 .init(kind: .dnsLatencyMs, name: "DNS", tint: MetricStyle.internet.shade(3, of: 4))],
+                            HistoryChart(history: metrics.history, lines: Self.latencyLines,
                                          range: range, format: { "\(Int($0)) ms" })
                         }
                     }
