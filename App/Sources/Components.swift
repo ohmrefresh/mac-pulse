@@ -255,16 +255,29 @@ struct Sparkline: View {
     /// Fixed y range (e.g. 0...100 for percentages); nil fits the data.
     var domain: ClosedRange<Double>?
     var height: CGFloat = 50
+    var lineWidth: CGFloat = 1.4
 
-    init(values: [Double], tint: Color, points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50) {
-        self.init(series: [Series(name: "value", values: values, tint: tint)], points: points, domain: domain, height: height)
+    init(values: [Double], tint: Color, points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50,
+         lineWidth: CGFloat = 1.4) {
+        self.init(series: [Series(name: "value", values: values, tint: tint)], points: points, domain: domain,
+                  height: height, lineWidth: lineWidth)
     }
 
-    init(series: [Series], points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50) {
+    init(series: [Series], points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50,
+         lineWidth: CGFloat = 1.4) {
         self.series = series
         self.points = points
         self.domain = domain
         self.height = height
+        self.lineWidth = lineWidth
+    }
+
+    /// Top of a percentage sparkline's scale: the peak plus 25% headroom, in steps of 10, never
+    /// below 30 (so a 3% load does not fill the chart and read like a busy Mac) or above 100.
+    /// Stepping means the scale only moves when the peak crosses a step, not on every tick.
+    static func percentTop(_ values: [Double]) -> Double {
+        let peak = values.filter { $0.isFinite }.max() ?? 0
+        return min(100, max(30, (peak * 1.25 / 10).rounded(.up) * 10))
     }
 
     var body: some View {
@@ -282,7 +295,7 @@ struct Sparkline: View {
                         LineMark(x: .value("t", offset + index), y: .value("v", value), series: .value("s", s.name))
                             .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(s.tint)
-                            .lineStyle(StrokeStyle(lineWidth: 1.4))
+                            .lineStyle(StrokeStyle(lineWidth: lineWidth))
                     }
                 }
             }

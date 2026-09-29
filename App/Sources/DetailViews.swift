@@ -71,17 +71,23 @@ struct PerformanceView: View {
         return WeightedHStack {
             KPITile(title: "CPU", style: .cpu, health: metrics.cpuHealth,
                     value: metrics.cpu.map { Format.percent($0.totalPercent) }, trend: metrics.cpuTrend) {
-                Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100, height: 30)
+                Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint,
+                          domain: 0...Sparkline.percentTop(Array(metrics.cpuHistory.values.suffix(60))),
+                          height: 44, lineWidth: 2)
             } action: { jump(proxy, .cpu) }
             KPITile(title: "GPU", style: .gpu, health: nil,
                     value: metrics.gpu.map { Format.percent($0.utilizationPercent) }, trend: metrics.gpuTrend) {
-                Sparkline(values: metrics.gpuHistory.values, tint: MetricStyle.gpu.tint, domain: 0...100, height: 30)
+                Sparkline(values: metrics.gpuHistory.values, tint: MetricStyle.gpu.tint,
+                          domain: 0...Sparkline.percentTop(Array(metrics.gpuHistory.values.suffix(60))),
+                          height: 44, lineWidth: 2)
             } action: { jump(proxy, .gpu) }
             KPITile(title: "Memory", style: .memory, health: m?.pressure?.health,
                     value: m.map { Format.percent($0.usedPercent) },
                     caption: m.map { memoryCaption($0) }) {
                 MeterBar(fraction: (m?.usedPercent ?? 0) / 100, tint: MetricStyle.memory.tint)
-                    .frame(height: 30, alignment: .center)
+                    .frame(height: 44, alignment: .center)
+                    // 8 from the tile plus 6 lines the bar up with the text above it.
+                    .padding(.horizontal, 6)
             } action: { jump(proxy, .memory) }
             // °C when the private sensors report one (ADR 0002), otherwise macOS's own Thermal State.
             KPITile(title: celsius == nil ? "Thermal" : "CPU die", style: .temperature,
@@ -90,7 +96,8 @@ struct PerformanceView: View {
                     trend: celsius == nil ? nil : metrics.temperatureTrend,
                     trendFormat: { "\(Int(abs($0).rounded()))°" }) {
                 if celsius != nil {
-                    Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 30)
+                    Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 44,
+                              lineWidth: 2)
                 }
             } action: { jump(proxy, .thermal) }
         }
@@ -425,30 +432,40 @@ private struct KPITile<Chart: View>: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Circle().fill(style.tint).frame(width: 7, height: 7)
-                    Text(title).font(.callout.weight(.medium)).foregroundStyle(.secondary)
-                    if let health, health >= .warning {
-                        Text("· \(Format.health(health))")
-                            .font(.callout.weight(.medium))
-                            .foregroundStyle(health.tint.readableInk(on: .card, minimum: 4.5))
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Circle().fill(style.tint).frame(width: 7, height: 7)
+                        Text(title).font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                        if let health, health >= .warning {
+                            Text("· \(Format.health(health))")
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(health.tint.readableInk(on: .card, minimum: 4.5))
+                        }
                     }
-                }
-                .lineLimit(1)
-                Text(value ?? "—").font(.title2.weight(.semibold)).monospacedDigit().lineLimit(1)
-                Group {
-                    if let caption {
-                        Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    } else {
-                        DeltaLabel(value: trend, format: trendFormat)
+                    .lineLimit(1)
+                    Text(value ?? "—").font(.title2.weight(.semibold)).monospacedDigit().lineLimit(1)
+                    Group {
+                        if let caption {
+                            Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        } else {
+                            DeltaLabel(value: trend, format: trendFormat)
+                        }
                     }
+                    .frame(height: 16, alignment: .leading)
                 }
-                .frame(height: 16, alignment: .leading)
-                chart.frame(height: 30)
+                .padding([.top, .horizontal], 14)
+                // Pins the chart to the bottom whether or not the Trend row drew anything, so
+                // every tile's chart shares one baseline.
+                Spacer(minLength: 8)
+                // Inset from the edges so the line reads as part of the tile, not its border.
+                chart.frame(maxWidth: .infinity).frame(height: 44)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .cardBackground(padding: 14)
+            .cardBackground(padding: 0)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
