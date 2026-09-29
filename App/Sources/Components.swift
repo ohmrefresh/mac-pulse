@@ -658,7 +658,9 @@ struct AppLogo: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-            .fill(LinearGradient(colors: [Color(red: 0.25, green: 0.6, blue: 1), Color(red: 0.1, green: 0.35, blue: 0.95)],
+            // The app icon's own gradient (#3B7BFF → #1D3FD6, Redesign_v1), so the in-app mark matches it.
+            .fill(LinearGradient(colors: [Color(red: 0x3B / 255, green: 0x7B / 255, blue: 1),
+                                          Color(red: 0x1D / 255, green: 0x3F / 255, blue: 0xD6 / 255)],
                                  startPoint: .top, endPoint: .bottom))
             .frame(width: size, height: size)
             .overlay {
