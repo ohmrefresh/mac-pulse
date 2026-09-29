@@ -5,6 +5,17 @@ import PulseCore
 public enum ConcernSignal: CaseIterable, Sendable {
     case cpu, memory, internet, battery, thermal
 
+    /// The Menu Bar item that shows this signal's reading.
+    public var menuBarItem: MenuBarItem {
+        switch self {
+        case .cpu: .cpu
+        case .memory: .memory
+        case .internet: .latency
+        case .battery: .battery
+        case .thermal: .thermal
+        }
+    }
+
     /// The timeline category whose events record this signal's Health Level changes.
     public var category: TimelineCategory {
         switch self {

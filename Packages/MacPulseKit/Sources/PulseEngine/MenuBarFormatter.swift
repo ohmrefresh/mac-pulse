@@ -35,18 +35,37 @@ public struct MenuBarInputs: Sendable {
     }
 }
 
+/// One rendered item of the Menu Bar title.
+public struct MenuBarSegment: Equatable, Sendable {
+    public var item: MenuBarItem
+    public var text: String
+    /// The Concern's Health Level on the segment that leads because of it; nil on every other one.
+    public var level: HealthLevel?
+}
+
 public enum MenuBarFormatter {
-    /// PRD §5 Level 1 style, e.g. "CPU 21% | MEM 62% | ↓8.4M ↑1.2M | 18ms". Missing readings render as "--".
+    /// PRD §5 Level 1 style, e.g. "CPU 21% · MEM 62% · ↓8.4M ↑1.2M · 18ms". Missing readings render as "--".
     /// Battery is omitted on Macs without one.
-    public static func text(_ items: [MenuBarItem], _ inputs: MenuBarInputs) -> String {
-        segments(items, inputs).map(\.text).joined(separator: separator)
+    public static func text(_ items: [MenuBarItem], _ inputs: MenuBarInputs, concern: Concern? = nil) -> String {
+        segments(items, inputs, concern: concern).map(\.text).joined(separator: separator)
     }
 
-    public static let separator = " | "
+    public static let separator = " · "
 
     /// The rendered segments, in order, for callers that decorate each one (e.g. with an icon).
-    public static func segments(_ items: [MenuBarItem], _ inputs: MenuBarInputs) -> [(item: MenuBarItem, text: String)] {
-        items.compactMap { item in segment(item, inputs).map { (item, $0) } }
+    ///
+    /// During a Concern its metric leads, marked with the Concern's level, whether or not the user
+    /// chose to show it: the Menu Bar shows what needs attention first, then what the user picked.
+    public static func segments(_ items: [MenuBarItem], _ inputs: MenuBarInputs,
+                                concern: Concern? = nil) -> [MenuBarSegment] {
+        var rest = items.compactMap { item in segment(item, inputs).map { MenuBarSegment(item: item, text: $0) } }
+        guard let concern else { return rest }
+        let lead = concern.signal.menuBarItem
+        rest.removeAll { $0.item == lead }
+        // Battery Condition, not charge, is what went wrong: the charge figure would not say so.
+        let text = concern.signal == .battery ? "BAT Service" : segment(lead, inputs)
+        guard let text else { return rest }
+        return [MenuBarSegment(item: lead, text: text, level: concern.level)] + rest
     }
 
     /// SF Symbol shown before an item's text when menu-bar icons are on.

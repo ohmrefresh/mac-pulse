@@ -42,17 +42,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     private static let statusFont = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    /// The Concern's segment: weight, not colour, carries the emphasis (menu-bar items stay template).
+    private static let concernFont = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
     /// Room left around the title inside the status item's button.
     private static let statusPadding: CGFloat = 12
 
     /// Segment text with an optional template SF Symbol before each item. Template images follow the
-    /// menu bar's light/dark/highlighted appearance like the system's own items.
-    private func statusTitle(_ segments: [(item: MenuBarItem, text: String)]) -> NSAttributedString {
+    /// menu bar's light/dark/highlighted appearance like the system's own items. The Concern's segment
+    /// always leads with its severity glyph (in place of the item's icon) and is set semibold.
+    private func statusTitle(_ segments: [MenuBarSegment]) -> NSAttributedString {
         let attributes: [NSAttributedString.Key: Any] = [.font: Self.statusFont]
         let title = NSMutableAttributedString()
         for (index, segment) in segments.enumerated() {
             if index > 0 { title.append(NSAttributedString(string: MenuBarFormatter.separator, attributes: attributes)) }
-            if settings.menuBarShowsIcons, let image = Self.symbolImage(for: segment.item) {
+            let icon = segment.level.map(Self.severityImage)
+                ?? (settings.menuBarShowsIcons ? Self.symbolImage(for: segment.item) : nil)
+            if let image = icon {
                 let attachment = NSTextAttachment()
                 attachment.image = image
                 // Center the glyph on the text's cap height rather than sitting on the baseline.
@@ -61,9 +66,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 title.append(NSAttributedString(attachment: attachment))
                 title.append(NSAttributedString(string: " ", attributes: attributes))
             }
-            title.append(NSAttributedString(string: segment.text, attributes: attributes))
+            title.append(NSAttributedString(string: segment.text,
+                                            attributes: segment.level == nil ? attributes : [.font: Self.concernFont]))
         }
         return title
+    }
+
+    private static var severityImages: [HealthLevel: NSImage] = [:]
+
+    /// The Health Level's glyph (triangle, octagon) as a template, so severity reads by shape.
+    private static func severityImage(_ level: HealthLevel) -> NSImage? {
+        if let cached = severityImages[level] { return cached }
+        let config = NSImage.SymbolConfiguration(pointSize: NSFont.systemFontSize - 1, weight: .semibold)
+        let image = NSImage(systemSymbolName: level.symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        severityImages[level] = image
+        return image
     }
 
     private static var symbolImages: [MenuBarItem: NSImage] = [:]
@@ -97,8 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         withObservationTracking {
             let items = settings.menuBarItems
             // With every metric disabled, show an icon so the app stays reachable.
-            let segments = items.isEmpty ? [] : MenuBarFormatter.segments(items, metrics.menuBarInputs)
-            let key = "\(settings.menuBarShowsIcons)|" + segments.map(\.text).joined(separator: MenuBarFormatter.separator)
+            let concern = metrics.concern
+            let segments = items.isEmpty ? [] : MenuBarFormatter.segments(items, metrics.menuBarInputs, concern: concern)
+            let key = "\(settings.menuBarShowsIcons)|\(concern?.level.rawValue ?? 0)|"
+                + segments.map(\.text).joined(separator: MenuBarFormatter.separator)
             if key != shownTitleKey {
                 shownTitleKey = key
                 let title = statusTitle(segments)
@@ -110,6 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     statusItem?.length = width
                 }
                 statusItem?.button?.attributedTitle = title
+                statusItem?.button?.setAccessibilityLabel(concern.map {
+                    "\(Format.health($0.level)): " + segments.map(\.text).joined(separator: ", ")
+                })
             }
             if segments.isEmpty, statusItem?.button?.image == nil {
                 statusItem?.button?.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: "Mac Pulse")

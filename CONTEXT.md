@@ -21,7 +21,7 @@ The fixed translation from a source scale to Health Level — thermal Nominal/Fa
 
 **Concern**:
 The single worst non-Healthy signal at a given moment — CPU, memory pressure, internet, Battery Condition or
-Thermal State — shown as the lead on the Popover and the Overview. Absent when everything is Healthy; a tie
+Thermal State — shown as the lead on the Menu Bar, the Popover and the Overview. Absent when everything is Healthy; a tie
 goes to the signal read first in that order.
 _Avoid_: alert (an Alert is a Firing Alert Rule), status banner
 
