@@ -32,13 +32,22 @@ enum ChartRange: TimeInterval, CaseIterable, Identifiable {
 struct ChartRangePicker: View {
     @Binding var range: ChartRange
     var options: [ChartRange] = ChartRange.allCases
+    /// When set, the live option is labelled by the span it covers ("5m") instead of "Live".
+    var liveWindow: TimeInterval?
     var body: some View {
         Picker("Range", selection: $range) {
-            ForEach(options) { Text($0.label).tag($0) }
+            ForEach(options) { option in
+                Text(option == .live ? liveWindow.map(Self.span) ?? option.label : option.label).tag(option)
+            }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
+    }
+
+    /// "5m", "10m", or seconds below a minute.
+    private static func span(_ seconds: TimeInterval) -> String {
+        seconds >= 60 ? "\(Int((seconds / 60).rounded()))m" : "\(Int(seconds))s"
     }
 }
 
@@ -96,11 +105,13 @@ struct HistoryChart: View {
                             AreaMark(x: .value("Time", point.time),
                                      yStart: .value("Min", point.min), yEnd: .value("Max", point.max),
                                      series: .value("Band", "\(line.name)-band-\(index)"))
+                                .interpolationMethod(ChartCurve.line)
                                 .foregroundStyle(by: .value("Series", line.name))
                                 .opacity(0.18)
                         }
                         LineMark(x: .value("Time", point.time), y: .value(line.name, point.avg),
                                  series: .value("Segment", "\(line.name)-\(index)"))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(by: .value("Series", line.name))
                             .lineStyle(StrokeStyle(lineWidth: 1.4))
                     }

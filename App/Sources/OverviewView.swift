@@ -333,35 +333,3 @@ private struct ActivityRow: View {
         .accessibilityElement(children: .combine)
     }
 }
-
-/// Children side by side at fixed shares of the width (equal by default), all as tall as the
-/// tallest. `Grid` cannot do a 5:7 split, and an `HStack` hands width to whichever child asks.
-private struct WeightedHStack: Layout {
-    var weights: [CGFloat] = []
-    var spacing: CGFloat = 16
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 900
-        let height = zip(subviews, widths(width, count: subviews.count))
-            .map { $0.sizeThatFits(ProposedViewSize(width: $1, height: nil)).height }
-            .max() ?? 0
-        return CGSize(width: width, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        for (subview, width) in zip(subviews, widths(bounds.width, count: subviews.count)) {
-            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
-            x += width + spacing
-        }
-    }
-
-    /// Weights that do not match the child count (a tile hidden on this Mac) fall back to equal shares.
-    private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
-        guard count > 0 else { return [] }
-        let shares = weights.count == count ? weights : Array(repeating: 1, count: count)
-        let usable = max(total - spacing * CGFloat(count - 1), 0)
-        let sum = shares.reduce(0, +)
-        return shares.map { usable * $0 / sum }
-    }
-}

@@ -230,6 +230,14 @@ enum Palette {
     }
 }
 
+// MARK: - Curve
+
+/// The curve every line chart draws: through each sample, never past it. Monotone, so a line
+/// cannot dip below zero or show a peak that was not measured.
+enum ChartCurve {
+    static let line: InterpolationMethod = .monotone
+}
+
 // MARK: - Sparkline
 
 /// Shape-only trend line with a gradient fill. Plots the last `points` values; fewer values sit at the right edge.
@@ -268,9 +276,11 @@ struct Sparkline: View {
                     if !value.isNaN {
                         AreaMark(x: .value("t", offset + index), yStart: .value("base", yDomain.lowerBound),
                                  yEnd: .value("v", value), series: .value("s", s.name))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.35), s.tint.opacity(0.02)],
                                                             startPoint: .top, endPoint: .bottom))
                         LineMark(x: .value("t", offset + index), y: .value("v", value), series: .value("s", s.name))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(s.tint)
                             .lineStyle(StrokeStyle(lineWidth: 1.4))
                     }
@@ -384,6 +394,75 @@ struct FigureText: View {
         .monospacedDigit()
         .lineLimit(1)
         .fixedSize()
+    }
+}
+
+/// One row per logical core, one column per recent sample, shaded by load: many cores read at a
+/// glance where as many lines tangle. Rows are numbered, not labelled P/E — which core belongs to
+/// which cluster is not reported. Silent to VoiceOver; the rail beside it carries the figures.
+struct CoreHeatmap: View {
+    /// Per core, oldest first, 0...100.
+    let cores: [[Double]]
+    let tint: Color
+    var columns = 60
+    var rowHeight: CGFloat = 7
+
+    var body: some View {
+        Canvas { context, size in
+            guard !cores.isEmpty, columns > 0 else { return }
+            let pitch = size.width / CGFloat(columns)
+            // Cells read as cells only when they are wide enough; a full live window is a strip.
+            let gap: CGFloat = pitch >= 5 ? 1 : 0
+            for (row, values) in cores.enumerated() {
+                let y = CGFloat(row) * (rowHeight + 1)
+                let tail = values.suffix(columns)
+                let offset = columns - tail.count
+                // One fill for the row's idle shade, then only the samples that carry load: at rest
+                // most cores are idle, and a fill per cell per second is the page's main drawing cost.
+                let start = CGFloat(offset) * pitch
+                context.fill(Path(CGRect(x: start, y: y, width: size.width - start, height: rowHeight)),
+                             with: .color(tint.opacity(0.08)))
+                for (index, value) in tail.enumerated() where value >= 2 {
+                    let rect = CGRect(x: CGFloat(offset + index) * pitch, y: y, width: pitch - gap, height: rowHeight)
+                    context.fill(Path(rect), with: .color(tint.opacity(0.92 * min(value / 100, 1))))
+                }
+            }
+        }
+        .frame(height: CGFloat(cores.count) * (rowHeight + 1))
+        .accessibilityHidden(true)
+    }
+}
+
+
+/// Children side by side at fixed shares of the width (equal by default), all as tall as the
+/// tallest. `Grid` cannot do a 5:7 split, and an `HStack` hands width to whichever child asks.
+struct WeightedHStack: Layout {
+    var weights: [CGFloat] = []
+    var spacing: CGFloat = 16
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 900
+        let height = zip(subviews, widths(width, count: subviews.count))
+            .map { $0.sizeThatFits(ProposedViewSize(width: $1, height: nil)).height }
+            .max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths(bounds.width, count: subviews.count)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
+    }
+
+    /// Weights that do not match the child count (a tile hidden on this Mac) fall back to equal shares.
+    private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
+        guard count > 0 else { return [] }
+        let shares = weights.count == count ? weights : Array(repeating: 1, count: count)
+        let usable = max(total - spacing * CGFloat(count - 1), 0)
+        let sum = shares.reduce(0, +)
+        return shares.map { usable * $0 / sum }
     }
 }
 
@@ -557,42 +636,6 @@ struct DeltaLabel: View {
             .accessibilityLabel(value > 0 ? "Up \(format(value))" : "Down \(format(value))")
             .accessibilityHint("Compared with the five minute average")
         }
-    }
-}
-
-/// Ring of parts that add up to a whole, with the headline figure in the middle.
-struct DonutChart: View {
-    struct Slice: Identifiable {
-        let label: String
-        let value: Double
-        let tint: Color
-        var id: String { label }
-    }
-
-    let slices: [Slice]
-    let centerValue: String
-    let centerCaption: String
-    var diameter: CGFloat = 150
-
-    var body: some View {
-        Chart(slices) { slice in
-            SectorMark(angle: .value(slice.label, slice.value), innerRadius: .ratio(0.68), angularInset: 1.5)
-                .foregroundStyle(slice.tint)
-                .cornerRadius(3)
-        }
-        .chartLegend(.hidden)
-        .chartBackground { _ in
-            VStack(spacing: 1) {
-                Text(centerValue).font(.title3.weight(.semibold)).monospacedDigit()
-                Text(centerCaption).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: diameter, height: diameter)
-        // Each sector is an element by default; the legend beside the ring already lists every value.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(centerValue) \(centerCaption)")
-        .accessibilityValue(slices.map { "\($0.label) \(Format.memory(UInt64(max($0.value, 0))))" }
-            .joined(separator: ", "))
     }
 }
 

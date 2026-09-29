@@ -8,34 +8,48 @@ import PulseStore
 // Section screens for the dashboard (PRD §16). "Live" charts use the in-memory last few minutes;
 // other ranges read PulseStore history.
 
-/// Chart modes for the CPU section. Per Core needs a series per core, which only the in-memory
-/// live buffer has; stored history keeps the combined line and the one-minute load average.
+/// Chart modes for the CPU section. The per-core heatmap needs a series per core, which only the
+/// in-memory live buffer has; stored history keeps the combined line and the one-minute load average.
 private enum CPUChartMode: String, CaseIterable, Identifiable {
-    case perCore = "Per Core", loadAverage = "Load Average", combined = "Combined"
+    case cores = "Total + Cores", loadAverage = "Load Average"
     var id: Self { self }
 }
 
+/// After `docs/prd/Redesign_v1.html`: a KPI strip that jumps to its section, CPU as a total line over a
+/// per-core heatmap, GPU beside Thermal, and Memory in GB with its figures to the right.
 struct PerformanceView: View {
     let metrics: LiveMetrics
-    /// Memory Pressure row: opens the Timeline filtered to memory events.
+    /// Memory header: opens the Timeline filtered to memory events.
     let showMemoryTimeline: () -> Void
     @State private var range: ChartRange = .live
-    @State private var cpuMode: CPUChartMode = .perCore
+    @State private var cpuMode: CPUChartMode = .cores
+    /// The Total chart's plot area, which the heatmap below it lines up with.
+    @State private var cpuPlot: CGRect?
+
+    private enum Anchor: Hashable { case cpu, gpu, memory, thermal }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                summaryCards
-                cpuSection
-                gpuSection
-                memorySection
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    kpiStrip(proxy)
+                    cpuSection.id(Anchor.cpu)
+                    WeightedHStack {
+                        gpuSection.id(Anchor.gpu)
+                        thermalSection.id(Anchor.thermal)
+                    }
+                    memorySection.id(Anchor.memory)
+                }
+                .padding(24)
             }
-            .padding(24)
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) { ChartRangePicker(range: $range) }
+            ToolbarItemGroup(placement: .primaryAction) {
+                if range == .live { LivePill(interval: metrics.samplingInterval) }
+                ChartRangePicker(range: $range, liveWindow: liveWindow)
+            }
         }
-        // Speeds up the GPU tick and the temperature card only while this page is on screen.
+        // Speeds up the GPU tick and the temperature readings only while this page is on screen.
         .onAppear {
             metrics.performanceAppeared()
             metrics.sensorsAppeared()
@@ -46,86 +60,56 @@ struct PerformanceView: View {
         }
     }
 
-    // MARK: Summary cards
+    /// What the live buffers span: their capacity at the sampling interval.
+    private var liveWindow: TimeInterval { Double(metrics.cpuHistory.capacity) * metrics.samplingInterval }
 
-    /// Four across when there is room, two by two when the window is near its 980 pt minimum —
-    /// squeezing four cards into that width clips their titles.
-    private var summaryCards: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) {
-            cpuCard
-            gpuCard
-            memoryCard
-            temperatureCard
-        }
-    }
+    // MARK: KPI strip
 
-    private var cpuCard: some View {
-        summaryCard(title: "CPU", style: .cpu, health: metrics.cpuHealth,
-                    value: metrics.cpu.map { Format.percent($0.totalPercent) },
-                    trend: metrics.cpuTrend, caption: metrics.processorName,
-                    series: metrics.cpuHistory.values, domain: 0...100)
-    }
-
-    private var gpuCard: some View {
-        summaryCard(title: "GPU", style: .gpu,
-                    value: metrics.gpu.map { Format.percent($0.utilizationPercent) },
-                    trend: metrics.gpuTrend,
-                    caption: metrics.gpu?.memoryInUseBytes.map { "\(Format.memory($0)) in use" },
-                    series: metrics.gpuHistory.values, domain: 0...100)
-    }
-
-    private var memoryCard: some View {
+    private func kpiStrip(_ proxy: ScrollViewProxy) -> some View {
         let m = metrics.memory
-        return summaryCard(title: "Memory", style: .memory, health: m?.pressure?.health,
-                           value: m.map { Format.percent($0.usedPercent) },
-                           trend: metrics.memoryTrend,
-                           caption: m.map { Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes) },
-                           series: metrics.memoryHistory.values, domain: 0...100)
-    }
-
-    /// °C when the private sensors report one (ADR 0002), otherwise macOS's own Thermal State.
-    private var temperatureCard: some View {
         let celsius = metrics.sensors?.cpuCelsius
-        return summaryCard(title: "Temperature", style: .temperature,
-                           health: celsius == nil ? metrics.thermal?.health : nil,
-                           value: celsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal),
-                           trend: celsius == nil ? nil : metrics.temperatureTrend,
-                           trendFormat: { "\(Int(abs($0).rounded()))°C" },
-                           caption: celsius == nil ? "Thermal State" : "CPU die",
-                           series: celsius == nil ? [] : metrics.temperatureHistory.values,
-                           domain: nil)
+        return WeightedHStack {
+            KPITile(title: "CPU", style: .cpu, health: metrics.cpuHealth,
+                    value: metrics.cpu.map { Format.percent($0.totalPercent) }, trend: metrics.cpuTrend) {
+                Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100, height: 30)
+            } action: { jump(proxy, .cpu) }
+            KPITile(title: "GPU", style: .gpu, health: nil,
+                    value: metrics.gpu.map { Format.percent($0.utilizationPercent) }, trend: metrics.gpuTrend) {
+                Sparkline(values: metrics.gpuHistory.values, tint: MetricStyle.gpu.tint, domain: 0...100, height: 30)
+            } action: { jump(proxy, .gpu) }
+            KPITile(title: "Memory", style: .memory, health: m?.pressure?.health,
+                    value: m.map { Format.percent($0.usedPercent) },
+                    caption: m.map { memoryCaption($0) }) {
+                MeterBar(fraction: (m?.usedPercent ?? 0) / 100, tint: MetricStyle.memory.tint)
+                    .frame(height: 30, alignment: .center)
+            } action: { jump(proxy, .memory) }
+            // °C when the private sensors report one (ADR 0002), otherwise macOS's own Thermal State.
+            KPITile(title: celsius == nil ? "Thermal" : "CPU die", style: .temperature,
+                    health: metrics.thermal?.health,
+                    value: celsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal),
+                    trend: celsius == nil ? nil : metrics.temperatureTrend,
+                    trendFormat: { "\(Int(abs($0).rounded()))°" }) {
+                if celsius != nil {
+                    Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 30)
+                }
+            } action: { jump(proxy, .thermal) }
+        }
     }
 
-    /// Mockup summary card: headline value and its trend on the left, sparkline on the right.
-    private func summaryCard(title: String, style: MetricStyle, health: HealthLevel? = nil,
-                             value: String?, trend: Double?,
-                             trendFormat: @escaping (Double) -> String = { Format.percent(abs($0)) },
-                             caption: String?, series: [Double],
-                             domain: ClosedRange<Double>?) -> some View {
-        MetricCard(title: title, style: style, health: health) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        BigValue(value, awaiting: "Reading \(title.lowercased())…")
-                        DeltaLabel(value: trend, format: trendFormat)
-                    }
-                    Spacer(minLength: 4)
-                    if !series.isEmpty {
-                        Sparkline(values: series, tint: style.tint, points: 60, domain: domain, height: 48)
-                            .frame(maxWidth: 110)
-                    }
-                }
-                // Full card width, so "Apple M5 Pro" and "18.4 / 24 GB" are not clipped by the sparkline.
-                Text(caption ?? " ").font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-            }
-        }
+    private func jump(_ proxy: ScrollViewProxy, _ anchor: Anchor) {
+        withAnimation(.snappy) { proxy.scrollTo(anchor, anchor: .top) }
+    }
+
+    private func memoryCaption(_ m: MemoryReading) -> String {
+        var caption = "\(Format.memoryUsage(used: m.usedBytes, total: m.totalBytes))"
+        if m.swapUsedBytes > 0 { caption += " · \(Format.gigabytes(m.swapUsedBytes, places: 1)) GB swap" }
+        return caption
     }
 
     // MARK: CPU
 
     private var cpuSection: some View {
-        Section2(title: "CPU", subtitle: metrics.processorName) {
+        Section2(title: "CPU", subtitle: cpuSubtitle) {
             Picker("Mode", selection: $cpuMode) {
                 ForEach(CPUChartMode.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -134,8 +118,8 @@ struct PerformanceView: View {
             .fixedSize()
         } content: {
             ChartWithRail(rail: StatRail(rows: cpuRows)) {
-                VStack(alignment: .leading, spacing: 6) {
-                    cpuChart.frame(height: 200)
+                VStack(alignment: .leading, spacing: 8) {
+                    cpuChart
                     if let note = cpuChartNote {
                         Text(note).font(.caption).foregroundStyle(.secondary)
                     }
@@ -144,50 +128,60 @@ struct PerformanceView: View {
         }
     }
 
+    /// "Apple M5 Pro · 10 Performance + 5 Efficiency cores", in the kernel's own cluster names.
+    private var cpuSubtitle: String? {
+        let clusters = metrics.cpuTopology.clusters
+            .map { "\($0.logicalCount) \($0.name)" }
+            .joined(separator: " + ")
+        let parts = [metrics.processorName, clusters.isEmpty ? nil : clusters + " cores"].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     @ViewBuilder private var cpuChart: some View {
         switch (range, cpuMode) {
-        case (.live, .perCore):
-            TimeSeriesChart(series: perCoreSeries, interval: metrics.samplingInterval, maximum: 100,
-                            format: { "\(Int($0))%" }, showsLegend: false,
-                            emphasis: { $0 == "Total" ? 2.2 : 1 },
-                            accessibilityTitle: "CPU usage per core")
+        case (.live, .cores):
+            VStack(alignment: .leading, spacing: 6) {
+                TimeSeriesChart(series: [.init(name: "Total", values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint)],
+                                interval: metrics.samplingInterval, window: liveWindow, maximum: 100,
+                                format: { "\(Int($0))%" }, showsLegend: false, accessibilityTitle: "CPU usage")
+                    .frame(height: 110)
+                    .onPreferenceChange(ChartPlotFrameKey.self) { [$cpuPlot] frame in
+                        $cpuPlot.wrappedValue = frame
+                    }
+                if !metrics.perCoreHistory.isEmpty, let plot = cpuPlot {
+                    // The same minutes as the Total line, column under sample.
+                    CoreHeatmap(cores: metrics.perCoreHistory.map(\.values), tint: MetricStyle.cpu.tint,
+                                columns: metrics.cpuHistory.capacity)
+                        .frame(width: plot.width)
+                        .padding(.leading, plot.minX)
+                }
+            }
         case (.live, .loadAverage):
             TimeSeriesChart(series: [.init(name: "Load (1m)", values: metrics.loadHistory.values, tint: MetricStyle.cpu.tint)],
-                            interval: metrics.samplingInterval, format: Format.load,
+                            interval: metrics.samplingInterval, window: liveWindow, format: Format.load,
                             accessibilityTitle: "Load average")
-        case (.live, .combined):
-            TimeSeriesChart(series: [.init(name: "CPU", values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint)],
-                            interval: metrics.samplingInterval, maximum: 100, format: { "\(Int($0))%" },
-                            accessibilityTitle: "CPU usage")
+                .frame(height: 200)
         case (_, .loadAverage):
             HistoryChart(history: metrics.history,
                          lines: [.init(kind: .loadAverage1, name: "Load (1m)", tint: MetricStyle.cpu.tint)],
                          range: range, format: Format.load, accessibilityTitle: "Load average")
+                .frame(height: 200)
         default:
             HistoryChart(history: metrics.history,
                          lines: [.init(kind: .cpuPercent, name: "CPU", tint: MetricStyle.cpu.tint)],
                          range: range, maximum: 100, format: { "\(Int($0))%" },
                          accessibilityTitle: "CPU usage")
+                .frame(height: 200)
         }
-    }
-
-    /// One line per core in the CPU tint at stepped opacity, with the total on top.
-    private var perCoreSeries: [TimeSeriesChart.Series] {
-        let cores = metrics.perCoreHistory
-        return [TimeSeriesChart.Series(name: "Total", values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint)]
-            + cores.enumerated().map { index, series in
-                TimeSeriesChart.Series(name: "Core \(index + 1)", values: series.values,
-                                       tint: MetricStyle.cpu.shade(index + 1, of: cores.count + 1))
-            }
     }
 
     private var cpuChartNote: String? {
         switch (range, cpuMode) {
-        case (.live, .perCore):
+        case (.live, .cores):
             let count = metrics.perCoreHistory.count
-            return count == 0 ? nil : "Total plus \(count) logical cores."
-        case (_, .perCore):
-            return "Per-core detail is live only — showing combined CPU for this range."
+            return count == 0 ? nil : "Total above; below, one row per logical core, shaded by load from 0 to 100%."
+        case (_, .cores):
+            return "Per-core detail is live only — showing total CPU for this range."
         case (_, .loadAverage) where range != .live:
             return "Runnable threads averaged over one minute."
         default:
@@ -196,23 +190,29 @@ struct PerformanceView: View {
     }
 
     private var cpuRows: [StatRail.Row] {
-        let topology = metrics.cpuTopology
+        let cores = metrics.cpu?.perCorePercent ?? []
+        let busiest = cores.indices.max { cores[$0] < cores[$1] }
+        let current = metrics.frequency?.cpuCurrentHz
+        let maximum = metrics.frequency?.cpuMaxHz ?? metrics.cpuTopology.maxFrequencyHz
+        let frequency: String? = switch (current, maximum) {
+        case let (c?, m?): "\(Format.frequency(c)) / \(Format.frequency(m))"
+        case let (c?, nil): Format.frequency(c)
+        case let (nil, m?): "max \(Format.frequency(m))"
+        default: nil
+        }
         // Appended into one typed array: joining `.init` literals with `+` is too much for CI's type checker.
         var rows: [StatRail.Row] = [
-            .init(label: "Total usage", value: metrics.cpu.map { Format.percent($0.totalPercent) }),
-            .init(label: "Current frequency", value: metrics.frequency?.cpuCurrentHz.map(Format.frequency)),
-            // Apple Silicon reports a ceiling through IOReport; Intel publishes one through sysctl.
-            .init(label: "Max frequency",
-                  value: (metrics.frequency?.cpuMaxHz ?? topology.maxFrequencyHz).map(Format.frequency)),
+            .init(label: "Total", value: metrics.cpu.map { Format.percent($0.totalPercent) }),
+            .init(label: "Frequency", value: frequency),
+            .init(label: "Load 1 m · 5 m",
+                  value: metrics.loadAverage.map { "\(Format.load($0.oneMinute)) · \(Format.load($0.fiveMinutes))" }),
+            .init(label: "Busiest core", value: busiest.map { "Core \($0 + 1) · \(Format.percent(cores[$0]))" }),
+            // Below 5% counts as idle: a parked core still shows a percent or two of housekeeping.
+            .init(label: "Idle cores", value: cores.isEmpty ? nil : "\(cores.filter { $0 < 5 }.count) of \(cores.count)"),
         ]
-        // One row per cluster, labelled the way the kernel names it (e.g. "Super", "Performance").
-        rows += topology.clusters.map { StatRail.Row(label: "Cores (\($0.name))", value: "\($0.logicalCount)") }
-        rows += [
-            .init(label: "Logical processors", value: topology.logicalCount.map(String.init)),
-            .init(label: "Load average (1m)", value: metrics.loadAverage.map { Format.load($0.oneMinute) }),
-            .init(label: "Load average (5m)", value: metrics.loadAverage.map { Format.load($0.fiveMinutes) }),
-            .init(label: "Uptime", value: metrics.uptime.map(Format.uptime)),
-        ]
+        rows += metrics.topProcesses(byCPU: 2).map {
+            StatRail.Row(label: $0.name, value: "\(Format.decimal($0.cpuPercent, places: 0))%")
+        }
         return rows
     }
 
@@ -220,16 +220,27 @@ struct PerformanceView: View {
 
     private var gpuSection: some View {
         Section2(title: "GPU", subtitle: metrics.gpu?.name ?? "No GPU data") {
-            ChartWithRail(rail: StatRail(rows: gpuRows)) {
-                gpuChart.frame(height: 200)
-            }
+            Text(gpuSummary ?? "").font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+        } content: {
+            gpuChart.frame(height: 180)
         }
+    }
+
+    /// "Renderer 58% · 1.22 GB · 578 mW"; parts this Mac does not report are left out.
+    private var gpuSummary: String? {
+        let gpu = metrics.gpu
+        let parts = [gpu?.rendererPercent.map { "Renderer \(Format.percent($0))" },
+                     gpu?.memoryInUseBytes.map(Format.memory),
+                     metrics.frequency?.gpuPowerWatts.map(Format.watts)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var gpuChart: some View {
         if range == .live {
             TimeSeriesChart(series: [.init(name: "GPU", values: metrics.gpuHistory.values, tint: MetricStyle.gpu.tint)],
-                            interval: metrics.gpuInterval, maximum: 100, format: { "\(Int($0))%" },
+                            interval: metrics.gpuInterval,
+                            window: Double(metrics.gpuHistory.capacity) * metrics.gpuInterval,
+                            maximum: 100, format: { "\(Int($0))%" },
                             accessibilityTitle: "GPU usage",
                             // Distinguish "not yet" from "never": some Macs report no GPU counters.
                             emptyMessage: metrics.gpu == nil ? "No GPU data on this Mac." : nil)
@@ -241,20 +252,50 @@ struct PerformanceView: View {
         }
     }
 
-    private var gpuRows: [StatRail.Row] {
-        let gpu = metrics.gpu
-        return [
-            .init(label: "Total usage", value: gpu.map { Format.percent($0.utilizationPercent) }),
-            .init(label: "Renderer", value: gpu?.rendererPercent.map(Format.percent)),
-            .init(label: "Memory in use", value: gpu?.memoryInUseBytes.map(Format.memory)),
-            .init(label: "Power", value: metrics.frequency?.gpuPowerWatts.map(Format.watts)),
-        ]
+    // MARK: Thermal
+
+    private var thermalSection: some View {
+        Section2(title: "Thermal", subtitle: metrics.thermal.map { "State \(Format.thermal($0))" }) {
+            Text(metrics.sensors.flatMap { Format.fans($0.fans) } ?? "")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+        } content: {
+            thermalChart.frame(height: 180)
+        }
+    }
+
+    /// Only the sensors this Mac reports (ADR 0002): each line is drawn when it has readings.
+    private var thermalLines: [(name: String, kind: MetricKind, style: MetricStyle, series: TimedSeries)] {
+        [("CPU", .cpuTemperatureC, .temperature, metrics.temperatureHistory),
+         ("SSD", .ssdTemperatureC, .ssdTemperature, metrics.ssdTemperatureHistory),
+         ("Battery", .batteryTemperatureC, .batteryTemperature, metrics.batteryTemperatureHistory)]
+    }
+
+    @ViewBuilder private var thermalChart: some View {
+        if metrics.sensors.map({ $0.sensors.isEmpty }) ?? false {
+            InlineEmpty("No temperature sensors on this Mac. Thermal State comes from macOS.")
+        } else if range == .live {
+            TimedLineChart(lines: thermalLines.filter { !$0.series.samples.isEmpty }
+                               .map { .init(name: $0.name, samples: $0.series.samples, tint: $0.style.tint) },
+                           window: liveWindow, maximum: 100, format: { "\(Int($0))°" })
+        } else {
+            HistoryChart(history: metrics.history,
+                         lines: thermalLines.map { .init(kind: $0.kind, name: $0.name, tint: $0.style.tint) },
+                         range: range, maximum: 100, format: { "\(Int($0))°C" },
+                         accessibilityTitle: "Temperatures")
+        }
     }
 
     // MARK: Memory
 
     private var memorySection: some View {
-        Section2(title: "Memory", subtitle: metrics.memory.map { "\(Format.memory($0.totalBytes)) installed" }) {
+        Section2(title: "Memory", subtitle: metrics.memory.map { "\(Format.gigabytes($0.totalBytes, places: 0)) GB unified" }) {
+            HStack(spacing: 8) {
+                if let pressure = metrics.memory?.pressure {
+                    HealthBadge(level: pressure.health, label: pressureLabel(pressure.health))
+                }
+                Button("Pressure History", action: showMemoryTimeline).controlSize(.small)
+            }
+        } content: {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 20) {
                     memoryChart.frame(minWidth: 380)
@@ -268,12 +309,23 @@ struct PerformanceView: View {
         }
     }
 
+    /// "Pressure Warning · since 13:58"; the start comes from the live timeline and is left out
+    /// once that event has aged out.
+    private func pressureLabel(_ level: HealthLevel) -> String {
+        let label = "Pressure \(Format.health(level))"
+        guard level >= .warning,
+              let since = metrics.recentEvents.last(where: { $0.category == .memory && $0.severity == level })?.time
+        else { return label }
+        return label + " · since \(since.formatted(date: .omitted, time: .shortened))"
+    }
+
     private var memoryChart: some View {
         VStack(alignment: .leading, spacing: 6) {
             Group {
-                if range == .live {
-                    TimeSeriesChart(series: memorySeries, interval: metrics.samplingInterval, maximum: 100,
-                                    format: { "\(Int($0))%" }, stacked: true,
+                if range == .live, let total = metrics.memory?.totalBytes {
+                    let gib = Double(total) / 1_073_741_824
+                    TimeSeriesChart(series: memorySeries(scale: gib / 100), interval: metrics.samplingInterval,
+                                    window: liveWindow, maximum: gib, format: { "\(Int($0.rounded())) GB" }, stacked: true,
                                     accessibilityTitle: "Memory in use, by kind")
                 } else {
                     HistoryChart(history: metrics.history,
@@ -282,7 +334,7 @@ struct PerformanceView: View {
                                  accessibilityTitle: "Memory in use")
                 }
             }
-            .frame(height: 200)
+            .frame(height: 220)
             if range != .live {
                 Text("The memory split is live only — showing total used for this range.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -290,63 +342,185 @@ struct PerformanceView: View {
         }
     }
 
-    /// Bands add up to Memory Used plus Cached Files, as a share of installed RAM.
-    private var memorySeries: [TimeSeriesChart.Series] {
-        [("App memory", metrics.memoryAppHistory), ("Wired", metrics.memoryWiredHistory),
-         ("Compressed", metrics.memoryCompressedHistory), ("Cached files", metrics.memoryCachedHistory)]
-            .enumerated()
-            .map { index, pair in
-                TimeSeriesChart.Series(name: pair.0, values: pair.1.values,
-                                       tint: MetricStyle.memory.shade(index, of: 5))
-            }
+    /// Bands add up to Memory Used plus Cached Files, in GB (the buffers hold % of installed RAM).
+    private func memorySeries(scale: Double) -> [TimeSeriesChart.Series] {
+        memoryParts.map { part in
+            TimeSeriesChart.Series(name: part.name, values: part.history.values.map { $0 * scale }, tint: part.tint)
+        }
+    }
+
+    private var memoryParts: [(name: String, history: RecentSeries, tint: Color)] {
+        [("App", metrics.memoryAppHistory, MetricStyle.memory.shade(0, of: 4)),
+         ("Wired", metrics.memoryWiredHistory, MetricStyle.memory.shade(1, of: 4)),
+         ("Compressed", metrics.memoryCompressedHistory, MetricStyle.memory.shade(2, of: 4)),
+         ("Cached files", metrics.memoryCachedHistory, MetricStyle.memory.shade(3, of: 4))]
     }
 
     @ViewBuilder private var memoryBreakdown: some View {
         if let m = metrics.memory {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center, spacing: 16) {
-                    DonutChart(slices: memorySlices(m),
-                               centerValue: Format.memory(m.usedBytes), centerCaption: "in use", diameter: 132)
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(memorySlices(m)) { slice in
-                            HStack(spacing: 6) {
-                                Circle().fill(slice.tint).frame(width: 8, height: 8)
-                                Text(slice.label).foregroundStyle(.secondary).lineLimit(1)
-                                Spacer(minLength: 8)
-                                Text(Format.memory(UInt64(slice.value))).monospacedDigit()
-                            }
-                            .font(.caption)
-                        }
+            let total = Double(max(m.totalBytes, 1))
+            let parts: [(String, UInt64, Color)] = [
+                ("App", m.appBytes, MetricStyle.memory.shade(0, of: 4)),
+                ("Wired", m.wiredBytes, MetricStyle.memory.shade(1, of: 4)),
+                ("Compressed", m.compressedBytes, MetricStyle.memory.shade(2, of: 4)),
+                ("Cached files", m.cachedFilesBytes, MetricStyle.memory.shade(3, of: 4)),
+            ]
+            VStack(alignment: .leading, spacing: 12) {
+                FigureText(number: Format.gigabytes(m.usedBytes, places: 1),
+                           unit: "/ \(Format.gigabytes(m.totalBytes, places: 0)) GB in use", size: .title, unitSize: .callout)
+                StackedMeter(segments: parts.map { .init(fraction: Double($0.1) / total, tint: $0.2) }, height: 12)
+                VStack(spacing: 6) {
+                    ForEach(parts, id: \.0) { name, bytes, tint in
+                        breakdownRow(name, Format.memory(bytes), dot: tint)
                     }
+                    breakdownRow("Free", Format.memory(m.freeBytes), dot: .secondary)
                 }
                 Divider()
-                HStack {
-                    Text("Swap used").foregroundStyle(.secondary)
-                    Spacer()
-                    Text(Format.memory(m.swapUsedBytes)).monospacedDigit()
+                breakdownRow("Swap used", Format.memory(m.swapUsedBytes), dot: nil)
+                if let advice = memoryAdvice(m) {
+                    Text(advice).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.callout)
-                HStack {
-                    Text("Memory pressure").foregroundStyle(.secondary)
-                    Spacer()
-                    HealthBadge(level: m.pressure?.health ?? .unknown)
-                    // Same affordance the Sensors thermal card and Overview's Recent Activity use.
-                    Button("View History", action: showMemoryTimeline).controlSize(.small)
-                }
-                .font(.callout)
             }
         } else {
-            InlineEmpty("Memory history appears once a few samples are recorded.")
+            InlineEmpty("Memory figures appear with the first sample.")
         }
     }
 
-    /// Slices sum to installed RAM: Used (app + wired + compressed) plus Cached Files plus Free.
-    private func memorySlices(_ m: MemoryReading) -> [DonutChart.Slice] {
-        [.init(label: "App memory", value: Double(m.appBytes), tint: MetricStyle.memory.shade(0, of: 5)),
-         .init(label: "Wired", value: Double(m.wiredBytes), tint: MetricStyle.memory.shade(1, of: 5)),
-         .init(label: "Compressed", value: Double(m.compressedBytes), tint: MetricStyle.memory.shade(2, of: 5)),
-         .init(label: "Cached files", value: Double(m.cachedFilesBytes), tint: MetricStyle.memory.shade(3, of: 5)),
-         .init(label: "Free", value: Double(m.freeBytes), tint: .secondary)]
+    private func breakdownRow(_ label: String, _ value: String, dot: Color?) -> some View {
+        HStack(spacing: 6) {
+            if let dot { Circle().fill(dot).frame(width: 8, height: 8) }
+            Text(label).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 8)
+            Text(value).monospacedDigit()
+        }
+        .font(.callout)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Under pressure only, and hedged: what is measured, what it likely costs, who holds the most.
+    /// It names the largest process but never predicts what quitting it would do.
+    private func memoryAdvice(_ m: MemoryReading) -> String? {
+        guard let level = m.pressure?.health, level >= .warning else { return nil }
+        let squeezed = Format.gigabytes(m.compressedBytes + m.swapUsedBytes, places: 1)
+        var line = "Compressed + swap is \(squeezed) GB — likely costing CPU to fit memory."
+        if let top = metrics.topProcesses(byMemory: 1).first {
+            line += " \(top.name) uses the most (\(Format.memory(top.memoryBytes)))."
+        }
+        return line
+    }
+}
+
+/// One Performance KPI: name and status, the figure, its Trend or caption, a small chart. The whole
+/// tile is a button that scrolls to the section it summarises.
+private struct KPITile<Chart: View>: View {
+    let title: String
+    let style: MetricStyle
+    let health: HealthLevel?
+    let value: String?
+    var trend: Double?
+    var trendFormat: (Double) -> String = { Format.percent(abs($0)).replacingOccurrences(of: "%", with: " pt") }
+    var caption: String?
+    @ViewBuilder let chart: Chart
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Circle().fill(style.tint).frame(width: 7, height: 7)
+                    Text(title).font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                    if let health, health >= .warning {
+                        Text("· \(Format.health(health))")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(health.tint.readableInk(on: .card, minimum: 4.5))
+                    }
+                }
+                .lineLimit(1)
+                Text(value ?? "—").font(.title2.weight(.semibold)).monospacedDigit().lineLimit(1)
+                Group {
+                    if let caption {
+                        Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        DeltaLabel(value: trend, format: trendFormat)
+                    }
+                }
+                .frame(height: 16, alignment: .leading)
+                chart.frame(height: 30)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .cardBackground(padding: 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Go to \(title)")
+    }
+}
+
+/// "● Live · 1 s" — the live range and the sampling interval it runs at.
+private struct LivePill: View {
+    let interval: TimeInterval
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(.green).frame(width: 7, height: 7)
+            Text("Live · \(Format.decimal(interval, places: interval < 1 ? 1 : 0)) s")
+        }
+        .font(.caption.weight(.medium))
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .fixedSize()
+    }
+}
+
+/// Lines over wall-clock time, for readings on an irregular cadence (sensors): the x-axis spans the
+/// live window ending now, so every chart on the page covers the same minutes.
+private struct TimedLineChart: View {
+    struct Line: Identifiable {
+        let name: String
+        let samples: [(time: Date, value: Double)]
+        let tint: Color
+        var id: String { name }
+    }
+
+    let lines: [Line]
+    let window: TimeInterval
+    var maximum: Double
+    var format: (Double) -> String
+
+    var body: some View {
+        let end = lines.compactMap { $0.samples.last?.time }.max() ?? .now
+        // The same fixed span as the sample charts beside it, so nothing re-fits as readings arrive.
+        let start = end.addingTimeInterval(-window)
+        if lines.isEmpty {
+            InlineEmpty("Temperatures appear with the first sensor reading.")
+        } else {
+            Chart {
+                ForEach(lines) { line in
+                    ForEach(Array(line.samples.filter { $0.time >= start }.enumerated()), id: \.offset) { _, sample in
+                        LineMark(x: .value("Time", sample.time), y: .value(line.name, sample.value),
+                                 series: .value("Sensor", line.name))
+                            .interpolationMethod(ChartCurve.line)
+                            .foregroundStyle(by: .value("Sensor", line.name))
+                            .lineStyle(StrokeStyle(lineWidth: 1.6))
+                    }
+                }
+            }
+            .chartForegroundStyleScale(domain: lines.map(\.name), range: lines.map(\.tint))
+            .chartXScale(domain: start...end)
+            .chartYScale(domain: 0...maximum)
+            .chartXAxis(.hidden)
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(format(v)) } }
+                }
+            }
+            .chartLegend(position: .bottom, alignment: .leading)
+            .accessibilityLabel("Temperatures: " + lines.compactMap { line in
+                line.samples.last.map { "\(line.name) \(format($0.value))" }
+            }.joined(separator: ", "))
+        }
     }
 }
 
@@ -373,6 +547,7 @@ struct NetworkDetailView: View {
                             TimeSeriesChart(series: [.init(name: "Download", values: metrics.downHistory.values, tint: MetricStyle.network.tint),
                                                      .init(name: "Upload", values: metrics.upHistory.values, tint: MetricStyle.upload.tint)],
                                             interval: metrics.samplingInterval,
+                                            window: Double(metrics.downHistory.capacity) * metrics.samplingInterval,
                                             format: { MenuBarFormatter.rate($0) + "/s" })
                         } else {
                             HistoryChart(history: metrics.history,
@@ -387,7 +562,8 @@ struct NetworkDetailView: View {
                     Group {
                         if range == .live {
                             TimeSeriesChart(series: [.init(name: "Latency", values: metrics.latencyHistory.values, tint: MetricStyle.internet.tint)],
-                                            interval: 5, format: { "\(Int($0)) ms" })
+                                            interval: 5, window: Double(metrics.latencyHistory.capacity) * 5,
+                                            format: { "\(Int($0)) ms" })
                         } else {
                             HistoryChart(history: metrics.history, lines: Self.latencyLines,
                                          range: range, format: { "\(Int($0)) ms" })

@@ -13,6 +13,10 @@ struct TimeSeriesChart: View {
     let series: [Series]
     /// Seconds between samples.
     let interval: Double
+    /// Seconds the time axis covers, fixed from the first sample: the line enters at the right edge
+    /// and scrolls left. Left to the data, the axis re-fits each time the line reaches the left edge,
+    /// and the whole chart jumps.
+    let window: Double
     /// Fixed top of the y-axis (e.g. 100 for percentages); nil scales to the data.
     var maximum: Double?
     var format: (Double) -> String = { String(format: "%.0f", $0) }
@@ -36,6 +40,7 @@ struct TimeSeriesChart: View {
             boundaryMarks(stacked ? Self.boundaries(plotted.series) : [], interval: plotted.interval)
         }
         .chartForegroundStyleScale(domain: series.map(\.name), range: series.map(\.tint))
+        .chartXScale(domain: -window...0)
         .chartYScale(domain: 0...yTop)
         .chartYAxis {
             AxisMarks { value in
@@ -44,12 +49,20 @@ struct TimeSeriesChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks { value in
+            AxisMarks(values: Array(stride(from: -window, through: 0, by: window / 5))) { value in
                 AxisGridLine()
-                AxisValueLabel { if let v = value.as(Double.self) { Text(Self.ago(v)) } }
+                // "now" sits at the plot's right edge: anchored the usual way it has no room and is dropped.
+                AxisValueLabel(anchor: value.as(Double.self) == 0 ? .topTrailing : .topLeading) {
+                    if let v = value.as(Double.self) { Text(Self.ago(v)) }
+                }
             }
         }
         .chartLegend(showsLegend && series.count > 1 ? .visible : .hidden)
+        .chartBackground { proxy in
+            GeometryReader { geometry in
+                Color.clear.preference(key: ChartPlotFrameKey.self, value: proxy.plotFrame.map { geometry[$0] })
+            }
+        }
         // A line needs two points; until then the grid would sit there empty saying nothing.
         .overlay { if isEmpty { emptyState } }
         // Swift Charts makes every mark its own element: a per-core chart is thousands of them,
@@ -67,15 +80,18 @@ struct TimeSeriesChart: View {
                     let x = -Double(s.values.count - 1 - index) * interval
                     if stacked {
                         AreaMark(x: .value("Seconds ago", x), y: .value(s.name, value))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(by: .value("Series", s.name))
                     } else {
                         if series.count == 1 {
                             AreaMark(x: .value("Seconds ago", x), y: .value(s.name, value))
+                                .interpolationMethod(ChartCurve.line)
                                 .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.3), s.tint.opacity(0.02)],
                                                                 startPoint: .top, endPoint: .bottom))
                         }
                         LineMark(x: .value("Seconds ago", x), y: .value(s.name, value),
                                  series: .value("Series", s.name))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(by: .value("Series", s.name))
                             .lineStyle(StrokeStyle(lineWidth: emphasis(s.name)))
                     }
@@ -94,6 +110,8 @@ struct TimeSeriesChart: View {
                     let x = -Double(line.count - 1 - index) * interval
                     LineMark(x: .value("Seconds ago", x), y: .value("Boundary", value),
                              series: .value("Series", "boundary-\(band)"))
+                        // The same curve as the bands, so each edge sits on the band it outlines.
+                        .interpolationMethod(ChartCurve.line)
                         .foregroundStyle(Color(nsColor: .windowBackgroundColor))
                         .lineStyle(StrokeStyle(lineWidth: 1))
                 }
@@ -129,7 +147,18 @@ struct TimeSeriesChart: View {
     private var yTop: Double {
         if let maximum { return maximum }
         let peak = series.flatMap(\.values).filter { !$0.isNaN }.max() ?? 1
-        return max(peak * 1.15, 1)
+        return Self.niceCeiling(peak)
+    }
+
+    /// The next 1, 2 or 5 × 10ⁿ at or above `peak`, never below 1. Fitting the axis to the peak
+    /// itself rescales the chart on every new high; a stepped top moves only when a step is crossed.
+    static func niceCeiling(_ peak: Double) -> Double {
+        guard peak.isFinite, peak > 1 else { return 1 }
+        let magnitude = pow(10, floor(log10(peak)))
+        for step in [1.0, 2, 5, 10] where peak <= step * magnitude * (1 + 1e-9) {
+            return step * magnitude
+        }
+        return 10 * magnitude
     }
 
     /// A per-core chart is a dozen series of 300 samples; drawing every point would blow the 250 ms
@@ -175,5 +204,14 @@ struct TimeSeriesChart: View {
         let s = Int(-seconds)
         if s == 0 { return "now" }
         return s >= 60 ? "\(s / 60)m" : "\(s)s"
+    }
+}
+
+/// Where a chart's plot area sits inside the chart view, so a neighbour (the per-core heatmap)
+/// can line its columns up with the chart's time axis.
+struct ChartPlotFrameKey: PreferenceKey {
+    static let defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        value = nextValue() ?? value
     }
 }
