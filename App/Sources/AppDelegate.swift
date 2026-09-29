@@ -175,8 +175,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             let window = NSWindow(contentViewController: NSHostingController(
                 rootView: DashboardView(metrics: metrics, settings: settings, notifier: notifier)))
             window.title = "Mac Pulse"
-            // Each section draws its own large title (mockup); keep the name for the Window menu and Mission Control.
-            window.titleVisibility = .hidden
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
             window.setContentSize(NSSize(width: 1100, height: 760))
             window.isReleasedWhenClosed = false

@@ -25,13 +25,15 @@ struct PerformanceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(title: "Performance", subtitle: "CPU, GPU and memory over time.") { ChartRangePicker(range: $range) }
                 summaryCards
                 cpuSection
                 gpuSection
                 memorySection
             }
             .padding(24)
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { ChartRangePicker(range: $range) }
         }
         // Speeds up the GPU tick and the temperature card only while this page is on screen.
         .onAppear {
@@ -365,7 +367,6 @@ struct NetworkDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader(title: "Network", subtitle: "Throughput, latency and connection health.") { ChartRangePicker(range: $range) }
                 Section2(title: "Throughput", subtitle: metrics.network?.interface.map { "Interface \($0)" } ?? "No connection") {
                     Group {
                         if range == .live {
@@ -412,6 +413,9 @@ struct NetworkDetailView: View {
             }
             .padding(24)
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { ChartRangePicker(range: $range) }
+        }
     }
 
     @ViewBuilder
@@ -429,7 +433,6 @@ struct StorageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            PageHeader("Storage", subtitle: "Startup disk capacity.")
             if let d = metrics.disk {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(d.volumeName ?? "Startup disk").font(.title3.weight(.semibold))
@@ -459,7 +462,6 @@ struct BatteryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHeader("Battery", subtitle: "Charge, wear and accessory batteries.")
                 if let b = metrics.battery {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(alignment: .firstTextBaseline) {

@@ -29,6 +29,13 @@ import PulseCore
         #expect(Array(NetworkCollector.counters(only: primary).keys) == [primary])
         #expect(NetworkCollector.counters(only: "nonexistent0").isEmpty)
     }
+
+    @Test func liveInterfaceKindNamesHardwareOnly() throws {
+        let primary = try #require(NetworkCollector.primaryInterface(), "test host has no network route")
+        // A VPN tunnel can be primary and is not hardware, so only a name that exists must be non-empty.
+        if let kind = NetworkCollector.interfaceKind(primary) { #expect(!kind.isEmpty) }
+        #expect(NetworkCollector.interfaceKind("nonexistent0") == nil)
+    }
 }
 
 @Suite struct BatteryParseTests {
@@ -75,6 +82,12 @@ import PulseCore
         var d = description()
         d[kIOPSTypeKey] = "UPS"
         #expect(BatteryCollector.parse(d) == nil)
+    }
+
+    /// Live: a Mac reporting an internal power source is one the registry calls a laptop. Desktops (CI)
+    /// have no sample, so there is nothing to compare.
+    @Test func internalBatteryAgreesWithPowerSource() {
+        if BatteryCollector().sample() != nil { #expect(BatteryCollector.hasInternalBattery()) }
     }
 }
 

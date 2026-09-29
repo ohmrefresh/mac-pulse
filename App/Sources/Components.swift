@@ -1,6 +1,8 @@
 import SwiftUI
 import Charts
 import PulseCore
+import PulseCollectors
+import PulseEngine
 
 /// One accent color and symbol per metric family, shared by the popover, cards, charts and sidebar
 /// so a metric looks the same everywhere (mockup palette; adapts to Light/Dark via system colors).
@@ -121,12 +123,11 @@ enum OKLCH {
                 gamma(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
     }
 
-    /// The card surface each appearance draws (`cardBackground`'s `.background.secondary`). Ink is
-    /// measured against the card rather than the window because the card is the worse case in both
-    /// appearances: darker than the window in Light, lighter than it in Dark.
+    /// The card surface each appearance draws (`Palette.card`). Ink is measured against the card
+    /// rather than the window because the card is where status text sits.
     enum Surface {
-        static let light = (0.961, 0.961, 0.961)
-        static let dark = (0.157, 0.157, 0.165)
+        static let light = (1.0, 1.0, 1.0)
+        static let dark = (0.133, 0.133, 0.149)
     }
 
     /// `alpha` of `color` over `surface` — what a tinted capsule fill actually measures. Ink drawn
@@ -205,6 +206,30 @@ extension Color {
     }
 }
 
+// MARK: - Palette
+
+/// The dashboard's surfaces, after `docs/prd/Redesign_v1.html`. The design is dark-only; the Dark
+/// values are its hex codes, and Light mirrors them (grey window, white cards) so both appearances
+/// keep the same layering: window, then sidebar, then card on top.
+enum Palette {
+    /// Detail pane and toolbar. Design `#1a1a1d`.
+    static let window = dynamic(light: 0xF5F5F7, dark: 0x1A1A1D)
+    /// Sidebar column. Design `#1f1f23`.
+    static let sidebar = dynamic(light: 0xECECEF, dark: 0x1F1F23)
+    /// Cards and tiles. Design `#222226`; `OKLCH.Surface` holds the same values for contrast checks.
+    static let card = dynamic(light: 0xFFFFFF, dark: 0x222226)
+    /// Card outline. Design `#2c2c32`.
+    static let cardBorder = dynamic(light: 0xE2E2E6, dark: 0x2C2C32)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                           blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        })
+    }
+}
+
 // MARK: - Sparkline
 
 /// Shape-only trend line with a gradient fill. Plots the last `points` values; fewer values sit at the right edge.
@@ -270,14 +295,106 @@ struct Sparkline: View {
     }
 }
 
+// MARK: - Meter
+
+/// A share of a whole as a filled capsule: memory in use, battery charge, a process's slice.
+struct MeterBar: View {
+    /// 0...1; values outside are clamped, so a process above one core saturates the bar.
+    let fraction: Double
+    let tint: Color
+    var height: CGFloat = 6
+
+    var body: some View {
+        Capsule()
+            .fill(.quaternary)
+            .frame(height: height)
+            .overlay(alignment: .leading) {
+                GeometryReader { geometry in
+                    Capsule().fill(tint)
+                        .frame(width: geometry.size.width * min(max(fraction.isNaN ? 0 : fraction, 0), 1))
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// Parts of one whole side by side in one capsule: memory's App, Wired and Compressed. The rest of
+/// the track is what the parts leave. Silent to VoiceOver — the figures sit beside it as text.
+struct StackedMeter: View {
+    struct Segment {
+        let fraction: Double
+        let tint: Color
+    }
+
+    let segments: [Segment]
+    var height: CGFloat = 10
+
+    var body: some View {
+        GeometryReader { geometry in
+            let gap: CGFloat = 2
+            let usable = max(geometry.size.width - gap * CGFloat(max(segments.count - 1, 0)), 0)
+            HStack(spacing: gap) {
+                ForEach(segments.indices, id: \.self) { index in
+                    let fraction = segments[index].fraction
+                    Rectangle().fill(segments[index].tint)
+                        .frame(width: usable * min(max(fraction.isNaN ? 0 : fraction, 0), 1))
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: height)
+        .background(.quaternary)
+        .clipShape(Capsule())
+        .accessibilityHidden(true)
+    }
+}
+
+/// Rounded usage bar with a gradient fill (storage volumes, per-core rows).
+struct UsageBar: View {
+    let fraction: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule().fill(LinearGradient(colors: [tint.opacity(0.8), tint], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: geo.size.width * min(max(fraction, 0), 1))
+            }
+        }
+        .frame(height: 10)
+        .accessibilityElement()
+        .accessibilityLabel("Used")
+        .accessibilityValue(Format.percent(fraction * 100))
+    }
+}
+
+/// A headline figure: the number carries the weight, its unit sits small beside it.
+struct FigureText: View {
+    let number: String
+    let unit: String?
+    var size: Font = .title2
+    var unitSize: Font = .caption
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(number).font(size.weight(.semibold))
+            if let unit { Text(unit).font(unitSize).foregroundStyle(.secondary) }
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize()
+    }
+}
+
 // MARK: - Cards
 
 extension View {
     /// Rounded card surface used by every dashboard section.
     func cardBackground(padding: CGFloat = 16) -> some View {
         self.padding(padding)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+            .background(Palette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.cardBorder, lineWidth: 1))
     }
 }
 
@@ -287,14 +404,21 @@ struct MetricCard<Content: View>: View {
     let style: MetricStyle
     var health: HealthLevel?
     var healthLabel: String?
+    /// Washes the whole card in its Health Level's tint while Warning or Critical, so the card in
+    /// trouble is found before any label is read (Overview's headline row).
+    var emphasizesHealth = false
     @ViewBuilder let content: Content
 
+    /// Matches the Concern banner's wash, so the card and the banner above it read as one signal.
+    static var emphasisFill: Double { 0.12 }
+
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: style.symbol).foregroundStyle(style.tint).font(.title3).frame(width: 24)
-                // At the 980pt window minimum a three-up grid leaves "Internet Health" a few
-                // points short. Shrinking the title slightly keeps the word; an ellipsis loses it.
+                // At the 980pt window minimum a three-up grid leaves long titles a few points
+                // short. Shrinking the title slightly keeps the word; an ellipsis loses it.
                 Text(title).font(.headline).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 if let health { HealthBadge(level: health, label: healthLabel).fixedSize() }
@@ -302,7 +426,23 @@ struct MetricCard<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .cardBackground()
+        .padding(16)
+        .background {
+            shape.fill(Palette.card)
+            if let emphasis { shape.fill(emphasis.tint.opacity(Self.emphasisFill)) }
+        }
+        .overlay {
+            if let emphasis {
+                shape.strokeBorder(emphasis.tint.opacity(0.35), lineWidth: 0.5)
+            } else {
+                shape.strokeBorder(Palette.cardBorder, lineWidth: 1)
+            }
+        }
+    }
+
+    private var emphasis: HealthLevel? {
+        guard emphasizesHealth, let health, health >= .warning else { return nil }
+        return health
     }
 }
 
@@ -478,30 +618,6 @@ struct ChartWithRail<Content: View>: View {
 
 // MARK: - Headers
 
-/// In-content page title for every dashboard section (the window title bar is hidden).
-struct PageHeader<Trailing: View>: View {
-    let title: String
-    let subtitle: String?
-    @ViewBuilder let trailing: Trailing
-
-    var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.largeTitle.weight(.bold))
-                if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
-            }
-            Spacer()
-            trailing
-        }
-    }
-}
-
-extension PageHeader where Trailing == EmptyView {
-    init(_ title: String, subtitle: String?) {
-        self.init(title: title, subtitle: subtitle) { EmptyView() }
-    }
-}
-
 /// Heading for a group inside a page.
 struct SubsectionHeader: View {
     let title: String
@@ -567,5 +683,110 @@ final class IconCache {
         let icon = NSRunningApplication(processIdentifier: pid)?.icon ?? generic
         cache[pid] = icon
         return icon
+    }
+}
+
+// MARK: - Concern
+
+/// The Concern as a tinted banner: headline and start, what the signal measures now, and what is
+/// still healthy. The Popover shows it bare; the Overview adds actions at the trailing edge.
+struct ConcernBanner<Actions: View>: View {
+    let concern: Concern
+    let metrics: LiveMetrics
+    /// The Overview's larger variant.
+    var prominent = false
+    @ViewBuilder let actions: Actions
+
+    private static var fill: Double { MetricCard<EmptyView>.emphasisFill }
+
+    var body: some View {
+        let ink = concern.level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 4.5)
+        let shape = RoundedRectangle(cornerRadius: prominent ? 12 : 10, style: .continuous)
+        HStack(alignment: prominent ? .center : .top, spacing: prominent ? 14 : 10) {
+            Image(systemName: concern.level.symbol)
+                .font(prominent ? .title2 : .title3)
+                .foregroundStyle(concern.level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 3))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(metrics.concernHeadline(concern))
+                    .font((prominent ? Font.body : .callout).weight(.semibold))
+                    .foregroundStyle(ink)
+                // The Overview keeps it to one sentence: figures, then what is still fine.
+                if prominent {
+                    let line = [metrics.concernFigures(concern.signal), Format.healthyLine(concern.healthy)]
+                        .compactMap { $0 }.joined(separator: " ")
+                    if !line.isEmpty { Text(line).font(.callout).foregroundStyle(.secondary) }
+                } else {
+                    if let figures = metrics.concernFigures(concern.signal) { Text(figures).font(.caption) }
+                    if let healthy = Format.healthyLine(concern.healthy) {
+                        Text(healthy).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            actions
+        }
+        .padding(prominent ? 14 : 12)
+        .background(concern.level.tint.opacity(Self.fill), in: shape)
+        .overlay(shape.strokeBorder(concern.level.tint.opacity(0.35), lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension ConcernBanner where Actions == EmptyView {
+    init(concern: Concern, metrics: LiveMetrics) {
+        self.init(concern: concern, metrics: metrics, actions: { EmptyView() })
+    }
+}
+
+// MARK: - Top processes
+
+/// Which figure ranks the Top Processes list.
+enum ProcessSort: String, CaseIterable {
+    case cpu = "CPU", memory = "Memory"
+}
+
+/// The busiest processes by CPU or memory: icon, name, share bar, figure. A process holding a whole
+/// core or more is drawn red — that is the one to look at. Callers own the process-list gate.
+struct TopProcessList: View {
+    let metrics: LiveMetrics
+    @Binding var sort: ProcessSort
+    var count = 5
+    @State private var icons = IconCache()
+
+    var body: some View {
+        let rows = sort == .cpu ? metrics.topProcesses(byCPU: count) : metrics.topProcesses(byMemory: count)
+        let total = Double(max(metrics.memory?.totalBytes ?? 0, 1))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Top processes").font(.headline)
+                Spacer()
+                Picker("Sort by", selection: $sort) {
+                    ForEach(ProcessSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+            }
+            ForEach(rows) { process in
+                let hot = sort == .cpu && process.cpuPercent >= 100
+                let tint = hot ? Color.red : (sort == .cpu ? MetricStyle.cpu.tint : MetricStyle.memory.tint)
+                HStack(spacing: 8) {
+                    Image(nsImage: icons.icon(for: process.pid)).resizable().frame(width: 16, height: 16)
+                    Text(process.name).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    MeterBar(fraction: sort == .cpu ? process.cpuPercent / 100 : Double(process.memoryBytes) / total,
+                             tint: tint, height: 4)
+                        .frame(width: 100)
+                    Text(sort == .cpu ? "\(Format.decimal(process.cpuPercent, places: 1))%" : Format.memory(process.memoryBytes))
+                        .monospacedDigit()
+                        .foregroundStyle(hot ? Color.red.readableInk(on: .card, minimum: 4.5) : Color.secondary)
+                        .frame(width: 64, alignment: .trailing)
+                }
+                .font(.callout)
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 }

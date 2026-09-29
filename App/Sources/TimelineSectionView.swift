@@ -15,11 +15,6 @@ struct TimelineSectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            PageHeader(title: "Timeline", subtitle: "What changed on this Mac, and when.") {
-                ChartRangePicker(range: $range, options: ChartRange.stored)
-            }
-            .padding([.horizontal, .top], 24)
-            .padding(.bottom, 8)
             HStack {
                 Picker("Category", selection: $category) {
                     Text("All categories").tag(TimelineCategory?.none)
@@ -51,6 +46,9 @@ struct TimelineSectionView: View {
                 }
                 .listStyle(.inset)
             }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { ChartRangePicker(range: $range, options: ChartRange.stored) }
         }
         .task(id: range) { await load() }
     }

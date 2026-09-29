@@ -1,6 +1,7 @@
 import SwiftUI
 import PulseCore
 import PulseCollectors
+import PulseEngine
 
 enum Format {
     static func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
@@ -38,6 +39,11 @@ enum Format {
         f.allowsNonnumericFormatting = false   // "0 KB", not "Zero KB"
         return f
     }()
+
+    /// Memory in GB with a fixed number of decimals, binary like Activity Monitor ("20.3", "24").
+    static func gigabytes(_ bytes: UInt64, places: Int) -> String {
+        decimal(Double(bytes) / 1_073_741_824, places: places)
+    }
 
     /// "19.8 / 32 GB" — used over total in the total's unit (mockup memory value).
     static func memoryUsage(used: UInt64, total: UInt64) -> String {
@@ -99,6 +105,66 @@ enum Format {
         }
     }
 
+    /// The signal's name inside a sentence: "Memory pressure is Warning".
+    static func concernName(_ signal: ConcernSignal) -> String {
+        switch signal {
+        case .cpu: "CPU"
+        case .memory: "Memory pressure"
+        case .internet: "Internet"
+        case .battery: "Battery condition"
+        case .thermal: "Thermal state"
+        }
+    }
+
+    /// The Popover banner's headline for a Concern.
+    static func concernTitle(_ signal: ConcernSignal, offline: Bool) -> String {
+        switch signal {
+        case .cpu: "CPU busy"
+        case .memory: "Memory under pressure"
+        case .internet: offline ? "Offline" : "Internet slow"
+        case .battery: "Battery needs service"
+        case .thermal: "Mac running hot"
+        }
+    }
+
+    /// "CPU, thermals and network are healthy." Nil when nothing is.
+    static func healthyLine(_ signals: [ConcernSignal]) -> String? {
+        let names = signals.map { signal in
+            switch signal {
+            case .cpu: "CPU"
+            case .memory: "memory"
+            case .internet: "network"
+            case .battery: "battery"
+            case .thermal: "thermals"
+            }
+        }
+        guard let first = names.first else { return nil }
+        let list = names.formatted(.list(type: .and))
+        let verb = names.count > 1 || first == "thermals" ? "are" : "is"
+        return list.prefix(1).uppercased() + list.dropFirst() + " \(verb) healthy."
+    }
+
+    /// "Fans 1,900 rpm" for the fastest fan, "Fans stopped" when none spins. Nil without fans.
+    static func fans(_ fans: [FanReading]) -> String? {
+        guard let fastest = fans.map(\.rpm).max() else { return nil }
+        return fastest < 1 ? "Fans stopped" : "Fans \(decimal(fastest, places: 0)) rpm"
+    }
+
+    /// "Updated just now" while samples arrive on schedule; the age only once one is overdue (e.g.
+    /// after wake). Scaled to the sampling interval so a 5 s setting does not tick through "3s ago".
+    static func freshness(_ last: Date?, now: Date, interval: TimeInterval) -> String {
+        guard let last else { return "Starting…" }
+        let age = now.timeIntervalSince(last)
+        return age < max(3, 2 * interval) ? "Updated just now" : "Updated \(Int(age))s ago"
+    }
+
+    /// "MacBook · M5 Pro" — the kind of Mac and its chip, from what this Mac reports. The marketing
+    /// model name has no public API, so it is not guessed.
+    static func macSummary(hasBattery: Bool, processor: String?) -> String {
+        let chip = processor.map { $0.hasPrefix("Apple ") ? String($0.dropFirst(6)) : $0 }
+        return [hasBattery ? "MacBook" : "Mac", chip].compactMap { $0 }.joined(separator: " · ")
+    }
+
     static func batteryState(_ b: BatteryReading) -> String {
         let state = b.isCharging ? "Charging" : (b.onACPower ? "On AC" : "On battery")
         guard let minutes = b.minutesRemaining else { return state }
@@ -136,6 +202,22 @@ struct HealthBadge: View {
     }
 }
 
+/// A Health Level as glyph plus word ("✓ Healthy") under a popover row's value.
+struct HealthStatus: View {
+    let level: HealthLevel
+    var label: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            SeverityMark(level: level, font: .caption2)
+            Text(label ?? Format.health(level))
+                .font(.caption)
+                .foregroundStyle(level.tint.readableInk(on: .card, minimum: 4.5))
+        }
+        .lineLimit(1)
+    }
+}
+
 extension HealthLevel {
     /// The tint as a *mark* — a dot or glyph on a card, which WCAG 1.4.11 holds to 3:1.
     var markTint: Color { tint.readableInk(on: .card, minimum: 3.0) }
@@ -165,5 +247,53 @@ struct SeverityMark: View {
             .font(font)
             .foregroundStyle(level.markTint)
             .accessibilityLabel(Format.health(level))
+    }
+}
+
+extension LiveMetrics {
+    /// The most severe Firing Alert Rule's level; nil when none fires.
+    var worstFiringSeverity: HealthLevel? {
+        alertRules.filter { firingAlertIDs.contains($0.id) }.map(\.severity.health).max()
+    }
+
+    /// "Memory under pressure · since 13:58" — the Concern banner's headline.
+    func concernHeadline(_ concern: Concern) -> String {
+        var title = Format.concernTitle(concern.signal, offline: networkHealth?.connectivity == .offline)
+        if let since = started(concern) {
+            title += " · since \(since.formatted(date: .omitted, time: .shortened))"
+        }
+        return title
+    }
+
+    /// What the Concern's signal measures right now. Parts this Mac does not report are left out.
+    func concernFigures(_ signal: ConcernSignal) -> String? {
+        switch signal {
+        case .cpu:
+            guard let cpu else { return nil }
+            var line = "\(Format.percent(cpu.totalPercent)) in use"
+            if let top = topProcesses(byCPU: 1).first {
+                line += "; \(top.name) is busiest at \(Format.decimal(top.cpuPercent, places: 0))%"
+            }
+            return line + "."
+        case .memory:
+            guard let memory else { return nil }
+            var line = "\(Format.gigabytes(memory.usedBytes, places: 1)) of \(Format.gigabytes(memory.totalBytes, places: 0)) GB in use"
+            if memory.swapUsedBytes > 0 { line += ", \(Format.gigabytes(memory.swapUsedBytes, places: 1)) GB swap" }
+            return line + "."
+        case .internet:
+            guard let h = networkHealth else { return nil }
+            if h.connectivity == .offline { return "No route to the internet." }
+            let parts = [h.internet?.latencyMs.map { "\(Int($0.rounded())) ms latency" },
+                         h.internet?.lossPercent.map { "\(Format.percent($0)) packet loss" }].compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ") + "."
+        case .battery:
+            guard let battery else { return nil }
+            let capacity = battery.maximumCapacityPercent.map { ", maximum capacity \(Format.percent($0))" } ?? ""
+            return "macOS recommends service\(capacity)."
+        case .thermal:
+            guard let thermal else { return nil }
+            let celsius = sensors?.cpuCelsius.map { ", CPU at \(Format.celsius($0))" } ?? ""
+            return "Thermal state \(Format.thermal(thermal))\(celsius)."
+        }
     }
 }

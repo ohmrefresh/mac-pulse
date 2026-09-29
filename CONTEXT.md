@@ -19,6 +19,12 @@ _Avoid_: network status
 **Health Mapping**:
 The fixed translation from a source scale to Health Level — thermal Nominal/Fair→Healthy, Serious→Warning, Critical→Critical; memory pressure Normal/Warning/Critical one-to-one; Battery Condition Normal→Healthy, Service Recommended→Warning.
 
+**Concern**:
+The single worst non-Healthy signal at a given moment — CPU, memory pressure, internet, Battery Condition or
+Thermal State — shown as the lead on the Popover and the Overview. Absent when everything is Healthy; a tie
+goes to the signal read first in that order.
+_Avoid_: alert (an Alert is a Firing Alert Rule), status banner
+
 **Battery Condition**:
 macOS's own verdict on battery wear: Normal or Service Recommended. Independent of charge level.
 _Avoid_: battery health (for charge level)
@@ -55,6 +61,10 @@ The component that reads one metric family from the OS.
 
 **Probe**:
 An active network test (ICMP ping or DNS lookup) against a target, as opposed to passive reading.
+
+**Recent Activity**:
+The latest few Timeline Events, newest first, shown on the Overview. Every kind of event, not only Alerts.
+_Avoid_: recent alerts
 
 **Top Processes**:
 The top 10 processes by CPU and top 10 by memory at a process scan. The only processes kept in history.

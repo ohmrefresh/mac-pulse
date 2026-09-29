@@ -28,6 +28,8 @@ public final class LiveMetrics {
     /// visible, and individually nil for anything this Mac does not report.
     public private(set) var frequency: FrequencyReading?
     public let processorName: String?
+    /// A laptop: decides "MacBook" vs "Mac" in the sidebar. Read once at launch.
+    public let hasInternalBattery: Bool
     /// Fixed for the life of the process; `performanceCores`/`efficiencyCores` are nil on Intel.
     public let cpuTopology: CPUTopology
     @ObservationIgnored private let bootTime: Date?
@@ -38,6 +40,10 @@ public final class LiveMetrics {
     }
 
     public private(set) var samplingInterval: TimeInterval
+
+    /// When the last fast (CPU) sample arrived. Not observed: a view that shows freshness polls it,
+    /// so the every-second write does not invalidate anything.
+    @ObservationIgnored public private(set) var lastSampleAt: Date?
 
     /// Up to 300 samples (5 min at 1 s): sparklines use the tail, cards show averages.
     public private(set) var cpuHistory = RecentSeries(capacity: 300)
@@ -100,6 +106,7 @@ public final class LiveMetrics {
 
     public init(baseInterval: TimeInterval = 1, recorder: HistoryRecorder? = nil) {
         processorName = CPUCollector.processorName()
+        hasInternalBattery = BatteryCollector.hasInternalBattery()
         cpuTopology = SystemInfoCollector.topology()
         bootTime = SystemInfoCollector.bootTime()
         self.recorder = recorder
@@ -287,6 +294,10 @@ public final class LiveMetrics {
         Array(processes.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(limit))
     }
 
+    public func topProcesses(byMemory limit: Int) -> [ProcessRow] {
+        Array(processes.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(limit))
+    }
+
     public func setAlertRules(_ rules: [AlertRule]) {
         alertRules = rules
         alertEngine.setRules(rules)
@@ -353,6 +364,7 @@ public final class LiveMetrics {
     func apply(_ s: Snapshot) {
         if let v = s.cpu {
             cpu = v
+            lastSampleAt = Date()
             cpuHistory.append(v.totalPercent)
             if perCoreHistory.count != v.perCorePercent.count {
                 perCoreHistory = v.perCorePercent.map { _ in RecentSeries(capacity: 300) }

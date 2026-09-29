@@ -10,11 +10,7 @@ struct AlertsView: View {
     @State private var stored: [TimelineEvent] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PageHeader("Alerts", subtitle: "Rules that notify you when something needs attention.")
-                .padding([.horizontal, .top], 24)
-            form
-        }
+        form
         .task { await notifier.refreshAuthorization() }
         .task { await loadStored() }
     }
@@ -54,6 +50,7 @@ struct AlertsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
     }
 
     /// Stored alert events plus live ones not yet flushed, newest first.

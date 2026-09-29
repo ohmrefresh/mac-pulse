@@ -6,16 +6,23 @@ struct ProcessesView: View {
     let metrics: LiveMetrics
     /// Dashboard toolbar search.
     let search: String
-    @State private var sortOrder = [KeyPathComparator(\ProcessRow.cpuPercent, order: .reverse)]
+    @State private var sortOrder: [KeyPathComparator<ProcessRow>]
     @State private var icons = IconCache()
 
+    /// `initialSort` picks the column the table opens on, e.g. memory when the Concern is memory.
+    init(metrics: LiveMetrics, search: String, initialSort: ProcessSort = .cpu) {
+        self.metrics = metrics
+        self.search = search
+        _sortOrder = State(initialValue: [initialSort == .memory
+            ? KeyPathComparator(\ProcessRow.memoryBytes, order: .reverse)
+            : KeyPathComparator(\ProcessRow.cpuPercent, order: .reverse)])
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            PageHeader("Processes", subtitle: search.isEmpty ? "\(metrics.processes.count) processes"
-                                                             : "\(rows.count) of \(metrics.processes.count) processes match “\(search)”")
-                .padding([.horizontal, .top], 24)
-            table
-        }
+        table
+            .scrollContentBackground(.hidden)
+            .navigationSubtitle(search.isEmpty ? "\(metrics.processes.count) processes"
+                                               : "\(rows.count) of \(metrics.processes.count) processes match “\(search)”")
         .onAppear(perform: metrics.processListAppeared)
         .onDisappear(perform: metrics.processListDisappeared)
     }

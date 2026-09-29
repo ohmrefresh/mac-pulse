@@ -10,7 +10,6 @@ struct DeveloperView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHeader("Developer", subtitle: "Docker, local services, runtimes and network setup.")
                 docker
                 services
                 runtimes

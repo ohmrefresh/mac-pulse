@@ -16,7 +16,6 @@ struct SensorsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                header
                 if let s = metrics.sensors, !s.sensors.isEmpty {
                     cards(s)
                     HStack(alignment: .top, spacing: 16) {
@@ -41,22 +40,19 @@ struct SensorsView: View {
             }
             .padding(24)
         }
+        .toolbar { toolbarItems }
         .onAppear(perform: metrics.sensorsAppeared)
         .onDisappear(perform: metrics.sensorsDisappeared)
     }
 
-    // MARK: Header
+    // MARK: Toolbar
 
-    /// The same header every other page draws: title, subtitle, and the range picker in the
-    /// trailing slot. The page-title glyph and the bordered banner this page used to own existed
-    /// nowhere else in the app; thermal state now speaks through the standard Health badge.
-    private var header: some View {
-        PageHeader(title: "Sensors",
-                   subtitle: "Real-time temperature and hardware sensors from your Mac.") {
-            VStack(alignment: .trailing, spacing: 10) {
-                thermalBadge
-                ChartRangePicker(range: $range, options: ChartRange.sensors)
-            }
+    /// Thermal state and the range, as toolbar items beside the section title.
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            thermalBadge
+            ChartRangePicker(range: $range, options: ChartRange.sensors)
         }
     }
 

@@ -3,311 +3,279 @@ import PulseCore
 import PulseCollectors
 import PulseEngine
 
-/// Mockup Overview: fixed 3-column grid — CPU/Memory/Network, Disk/Battery/Temperature, Internet Health + Recent Activity.
+/// After `docs/prd/Redesign_v1.html`: the Concern, then CPU / Memory / Network as headline cards,
+/// Disk / Battery / Thermal as compact tiles, and the busiest processes beside Recent Activity.
 struct OverviewView: View {
     let metrics: LiveMetrics
     let runDiagnostics: () -> Void
-    let showTimeline: () -> Void
+    let showProcesses: (ProcessSort) -> Void
+    let showTimeline: (TimelineCategory?) -> Void
+    @AppStorage("overviewProcessSort") private var processSort = ProcessSort.cpu
 
     var body: some View {
         ScrollView {
-            // Rhythm, not a uniform stack: the concern line belongs to the header it qualifies, so
-            // it sits tight under it, and the grid starts after a wider gap.
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 10) {
-                    PageHeader(title: "Overview", subtitle: "A real-time view of your Mac's health and performance.") {
-                        Button(action: runDiagnostics) { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.large)
-                            .help("Run Diagnostics (⌘R)")
-                    }
-                    if let concern { concernLine(concern) }
+            VStack(alignment: .leading, spacing: 16) {
+                if let concern = metrics.concern { banner(concern) }
+                WeightedHStack {
+                    cpuCard
+                    memoryCard
+                    networkCard
                 }
-                Grid(horizontalSpacing: 16, verticalSpacing: 16) {
-                    GridRow {
-                        cpuCard
-                        memoryCard
-                        networkCard
-                    }
-                    GridRow {
-                        diskCard
-                        if let battery = metrics.battery {
-                            batteryCard(battery)
-                            temperatureCard
-                        } else {
-                            temperatureCard.gridCellColumns(2)
-                        }
-                    }
-                    GridRow {
-                        internetCard
-                        recentActivity.gridCellColumns(2)
-                    }
+                WeightedHStack {
+                    diskTile
+                    if let battery = metrics.battery { batteryTile(battery) }
+                    thermalTile
+                }
+                WeightedHStack(weights: [5, 7]) {
+                    topProcesses
+                    recentActivity
                 }
             }
             .padding(24)
         }
-    }
-
-    /// The worst state on this page, and when it started.
-    ///
-    /// Six cards of equal weight answer "what is happening" and leave the user to compare them.
-    /// This is the page's lead: it appears only when something is not healthy, because a banner
-    /// that is always there is one the eye learns to skip.
-    private struct Concern {
-        let level: HealthLevel
-        let name: String
-        let category: TimelineCategory
-    }
-
-    /// Reading order of the grid, so a tie resolves to whatever the eye reaches first.
-    private var concern: Concern? {
-        let candidates: [(HealthLevel?, String, TimelineCategory)] = [
-            (metrics.cpuHealth, "CPU", .cpu),
-            (metrics.memory?.pressure?.health, "Memory pressure", .memory),
-            (metrics.networkHealth?.health, "Internet", .connectivity),
-            (metrics.battery?.condition?.health, "Battery condition", .battery),
-            (metrics.thermal?.health, "Thermal state", .thermal),
-        ]
-        return candidates
-            .compactMap { level, name, category in
-                level.map { Concern(level: $0, name: name, category: category) }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: runDiagnostics) { Label("Run Diagnostics", systemImage: "waveform.path.ecg") }
+                    .labelStyle(.titleAndIcon)
+                    .buttonStyle(.borderedProminent)
+                    .help("Run Diagnostics (⌘R)")
             }
-            .filter { $0.level == .warning || $0.level == .critical }
-            .max { $0.level.rawValue < $1.level.rawValue }
-    }
-
-    /// When this state began, from the timeline the app already keeps. Absent if the event has
-    /// aged out of the live buffer — the state is still true, only its start time is unknown.
-    private func started(_ concern: Concern) -> Date? {
-        metrics.recentEvents
-            .filter { $0.category == concern.category && $0.severity == concern.level }
-            .max { $0.time < $1.time }?
-            .time
-    }
-
-    private func concernLine(_ concern: Concern) -> some View {
-        HStack(spacing: 8) {
-            SeverityMark(level: concern.level, font: .body)
-            Text(sentence(concern)).font(.body)
-            Spacer(minLength: 12)
-            Button("View Timeline", action: showTimeline)
-                .controlSize(.small)
         }
-        .accessibilityElement(children: .combine)
+        // The Top processes card and the CPU card's busiest process want the 1 s scan.
+        .onAppear(perform: metrics.processListAppeared)
+        .onDisappear(perform: metrics.processListDisappeared)
     }
 
-    /// "Memory pressure has been Critical since 23:15 · 4 minutes ago" — the clock for checking it
-    /// against another tool, the relative span because that is the question being asked.
-    private func sentence(_ concern: Concern) -> String {
-        let level = Format.health(concern.level)
-        guard let since = started(concern) else { return "\(concern.name) is \(level)" }
-        return "\(concern.name) has been \(level) since \(since.formatted(date: .omitted, time: .shortened)) · "
-            + since.formatted(.relative(presentation: .numeric))
+    // MARK: Concern
+
+    private func banner(_ concern: Concern) -> some View {
+        ConcernBanner(concern: concern, metrics: metrics, prominent: true) {
+            HStack(spacing: 8) {
+                switch concern.signal {
+                case .cpu: Button("Show Processes") { showProcesses(.cpu) }
+                case .memory: Button("Show Processes") { showProcesses(.memory) }
+                default: EmptyView()
+                }
+                Button("View Timeline") { showTimeline(concern.signal.category) }
+            }
+            .fixedSize()
+        }
     }
+
+    // MARK: Headline cards
 
     private var cpuCard: some View {
-        MetricCard(title: "CPU", style: .cpu, health: metrics.cpuHealth) {
-            BigValue(metrics.cpu.map { Format.percent($0.totalPercent) }, awaiting: "Reading CPU usage…")
-            Text(metrics.processorName ?? " ").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+        let cpu = metrics.cpu
+        let detail = [metrics.processorName, cpu.map { "\($0.perCorePercent.count) cores" }]
+            .compactMap { $0 }.joined(separator: " · ")
+        let top = metrics.topProcesses(byCPU: 1).first
+        return MetricCard(title: "CPU", style: .cpu, health: metrics.cpuHealth, emphasizesHealth: true) {
+            headline(detail: detail) {
+                if let cpu {
+                    figure("\(Int(cpu.totalPercent.rounded()))", unit: "%", health: metrics.cpuHealth)
+                } else {
+                    BigValue(nil, awaiting: "Reading CPU usage…")
+                }
+            }
             Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100)
+            Divider()
             FooterStats(stats: [
-                .init(label: "Avg (5m)", value: metrics.cpuFiveMinuteAverage.map(Format.percent)),
-                .init(label: "Peak (5m)", value: metrics.cpuFiveMinutePeak.map(Format.percent)),
-                .init(label: "Cores", value: metrics.cpu.map { "\($0.perCorePercent.count)" }),
+                .init(label: "Avg 5m", value: metrics.cpuFiveMinuteAverage.map(Format.percent)),
+                .init(label: "Peak 5m", value: metrics.cpuFiveMinutePeak.map(Format.percent)),
+                .init(label: "Top", value: top.map { "\($0.name) · \(Format.decimal($0.cpuPercent, places: 0))%" }),
             ])
         }
     }
 
     private var memoryCard: some View {
         let m = metrics.memory
-        return MetricCard(title: "Memory", style: .memory, health: m?.pressure?.health) {
-            BigValue(m.map { Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes) }, awaiting: "Reading memory…")
-            Text(m.map { "\(Format.percent($0.usedPercent)) in use" } ?? " ").font(.callout).foregroundStyle(.secondary)
-            Sparkline(values: metrics.memoryHistory.values, tint: MetricStyle.memory.tint, domain: 0...100)
-            FooterStats(stats: [
-                .init(label: "App", value: m.map { Format.memory($0.appBytes) }),
-                .init(label: "Wired", value: m.map { Format.memory($0.wiredBytes) }),
-                .init(label: "Compressed", value: m.map { Format.memory($0.compressedBytes) }),
-            ])
+        let health = m?.pressure?.health
+        let parts: [(String, UInt64)] = m.map { [("App", $0.appBytes), ("Wired", $0.wiredBytes),
+                                                 ("Compressed", $0.compressedBytes)] } ?? []
+        let total = Double(max(m?.totalBytes ?? 0, 1))
+        let shades = (0..<3).map { MetricStyle.memory.shade($0, of: 3) }
+        return MetricCard(title: "Memory", style: .memory, health: health, emphasizesHealth: true) {
+            headline(detail: m.map { "\(Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes)) in use" }) {
+                if let m {
+                    figure("\(Int(m.usedPercent.rounded()))", unit: "%", health: health)
+                } else {
+                    BigValue(nil, awaiting: "Reading memory…")
+                }
+            }
+            // Memory Used, part by part; the empty track is Cached Files plus Free Memory.
+            // Same height as the other cards' sparklines, so all three footers line up.
+            StackedMeter(segments: parts.enumerated().map { .init(fraction: Double($1.1) / total, tint: shades[$0]) },
+                         height: 12)
+                .frame(height: 50)
+            Divider()
+            FooterStats(stats: parts.enumerated().map { index, part in
+                .init(label: part.0, value: Format.memory(part.1), dot: shades[index])
+            })
         }
     }
 
     private var networkCard: some View {
         let n = metrics.network, h = metrics.networkHealth
+        let offline = h?.connectivity == .offline
+        let link = [n?.interfaceKind, n?.interface].compactMap { $0 }.joined(separator: " ")
+        let detail = [link.isEmpty ? nil : link, h?.internet.map { "ping \($0.address)" }]
+            .compactMap { $0 }.joined(separator: " · ")
         return MetricCard(title: "Network", style: .network, health: h?.health,
-                          healthLabel: h?.connectivity == .offline ? "Offline" : nil) {
-            HStack(spacing: 16) {
-                if let n {
-                    rateLabel(n.downBytesPerSec, arrow: "arrow.down", tint: MetricStyle.network.tint)
-                    rateLabel(n.upBytesPerSec, arrow: "arrow.up", tint: MetricStyle.upload.tint)
+                          healthLabel: offline ? "Offline" : nil, emphasizesHealth: true) {
+            headline(detail: detail) {
+                // Never a guessed latency: offline and timed-out probes read as words.
+                if offline {
+                    word("Offline", health: h?.health)
+                } else if let latency = h?.internet?.latencyMs {
+                    figure("\(Int(latency.rounded()))", unit: "ms", health: h?.health)
+                } else if h?.internet != nil {
+                    word("Timed out", health: h?.health)
                 } else {
-                    Text("Reading throughput…").font(.callout).foregroundStyle(.secondary)
+                    BigValue(nil, awaiting: "Measuring latency…")
                 }
             }
-            Text(n?.interface.map { "Interface \($0)" } ?? "No connection").font(.callout).foregroundStyle(.secondary)
-            Sparkline(series: [
-                .init(name: "Download", values: metrics.downHistory.values, tint: MetricStyle.network.tint),
-                .init(name: "Upload", values: metrics.upHistory.values, tint: MetricStyle.upload.tint),
-            ])
-            FooterStats(stats: [
-                .init(label: "Download", value: n.map { Format.rate($0.downBytesPerSec) }, dot: MetricStyle.network.tint),
-                .init(label: "Upload", value: n.map { Format.rate($0.upBytesPerSec) }, dot: MetricStyle.upload.tint),
-                .init(label: "Ping", value: h.map(MenuBarFormatter.latency)),
-            ])
-        }
-    }
-
-    private func rateLabel(_ value: Double, arrow: String, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Text(Format.rate(value)).font(.title2.weight(.semibold)).monospacedDigit()
-            Image(systemName: arrow).foregroundStyle(tint).font(.headline)
-        }
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
-    }
-
-    private var diskCard: some View {
-        MetricCard(title: "Disk", style: .disk) {
-            if let d = metrics.disk, d.totalBytes > 0 {
-                let fraction = Double(d.usedBytes) / Double(d.totalBytes)
-                Text(d.volumeName ?? "Startup disk").font(.title3.weight(.semibold))
-                HStack {
-                    Text("\(Format.bytesShort(d.usedBytes)) used / \(Format.bytesShort(d.totalBytes))")
-                    Spacer()
-                    Text(Format.percent(fraction * 100)).monospacedDigit()
-                }
-                .font(.callout).foregroundStyle(.secondary)
-                UsageBar(fraction: fraction, tint: MetricStyle.disk.tint)
-                Spacer(minLength: 0)
-                FooterStats(stats: [
-                    .init(label: "Used", value: Format.bytesShort(d.usedBytes), dot: MetricStyle.disk.tint),
-                    .init(label: "Free", value: Format.bytesShort(d.availableBytes), dot: .secondary),
-                    .init(label: "Capacity", value: Format.bytesShort(d.totalBytes)),
-                ])
-            } else {
-                Text("No volume is reporting capacity.")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func batteryCard(_ b: BatteryReading) -> some View {
-        MetricCard(title: "Battery", style: .battery, health: b.condition?.health) {
-            BigValue(Format.percent(b.percent))
-            Text(batteryLine(b)).font(.callout).foregroundStyle(.secondary).lineLimit(1)
-            Sparkline(values: metrics.batteryHistory.values, tint: MetricStyle.battery.tint, points: 120, domain: 0...100)
-            FooterStats(stats: [
-                .init(label: "Cycles", value: b.cycleCount.map(String.init)),
-                .init(label: "Condition", value: b.condition.map(Format.batteryCondition)),
-                .init(label: "Capacity", value: b.maximumCapacityPercent.map(Format.percent)),
-            ])
-        }
-    }
-
-    private func batteryLine(_ b: BatteryReading) -> String {
-        guard let minutes = b.minutesRemaining else { return Format.batteryState(b) }
-        return b.isCharging ? "\(Format.duration(minutes: minutes)) until full" : "\(Format.duration(minutes: minutes)) remaining"
-    }
-
-    /// What the headline figure means. With a °C reading the thermal state qualifies it; without
-    /// sensors the figure *is* the thermal state, so the caption names that instead of dashing it.
-    private func thermalCaption(_ s: SensorsReading?) -> String {
-        guard s?.cpuCelsius != nil else { return "macOS thermal state" }
-        return metrics.thermal.map { "CPU · thermal state \(Format.thermal($0))" } ?? "CPU die"
-    }
-
-    private var temperatureCard: some View {
-        let s = metrics.sensors
-        return MetricCard(title: "Temperature", style: .temperature, health: metrics.thermal?.health) {
-            BigValue(s?.cpuCelsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal), awaiting: "Reading temperature…")
-            Text(thermalCaption(s))
-                .font(.callout).foregroundStyle(.secondary).lineLimit(1)
-            Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint)
-            if let s, !s.isEmpty {
-                FooterStats(stats: [
-                    .init(label: "CPU", value: s.cpuCelsius.map(Format.celsius)),
-                    .init(label: "SSD", value: s.ssdCelsius.map(Format.celsius)),
-                    .init(label: "Battery", value: s.batteryCelsius.map(Format.celsius)),
-                    .init(label: "Fan rpm", value: s.fans.max(by: { $0.rpm < $1.rpm }).map { $0.rpm < 1 ? "Off" : "\(Int($0.rpm.rounded()))" }),
-                ])
-            }
-        }
-    }
-
-    private var internetCard: some View {
-        let h = metrics.networkHealth
-        return MetricCard(title: "Internet Health", style: .internet, health: h?.health,
-                          healthLabel: h?.connectivity == .offline ? "Offline" : nil) {
-            Text(internetMessage(h)).font(.callout).foregroundStyle(.secondary)
-            Spacer(minLength: 8)
+            Sparkline(series: [.init(name: "Down", values: metrics.downHistory.values, tint: MetricStyle.network.tint),
+                               .init(name: "Up", values: metrics.upHistory.values, tint: MetricStyle.upload.tint)])
             Divider()
-            HStack(alignment: .top) {
-                if let latency = h.map(MenuBarFormatter.latency) {
-                    internetStat(value: latency, label: "Ping",
-                                 icon: "circle.fill", tint: h?.health.markTint ?? .secondary)
-                }
-                Divider()
-                if let down = metrics.network.map({ Format.rate($0.downBytesPerSec) }) {
-                    internetStat(value: down, label: "Download",
-                                 icon: "arrow.down", tint: MetricStyle.network.tint)
-                }
-                Divider()
-                if let up = metrics.network.map({ Format.rate($0.upBytesPerSec) }) {
-                    internetStat(value: up, label: "Upload",
-                                 icon: "arrow.up", tint: MetricStyle.upload.tint)
+            FooterStats(stats: [
+                .init(label: "Down", value: n.map { Format.rate($0.downBytesPerSec) }, dot: MetricStyle.network.tint),
+                .init(label: "Up", value: n.map { Format.rate($0.upBytesPerSec) }, dot: MetricStyle.upload.tint),
+                .init(label: "Packet loss", value: h?.internet?.lossPercent.map(Format.percent)),
+            ])
+        }
+    }
+
+    /// Figure and what it is of, on one baseline.
+    private func headline<Figure: View>(detail: String?, @ViewBuilder figure: () -> Figure) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            figure()
+            if let detail, !detail.isEmpty {
+                Text(detail).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+    }
+
+    private func figure(_ number: String, unit: String, health: HealthLevel?) -> some View {
+        FigureText(number: number, unit: unit, size: .title, unitSize: .title3)
+            .foregroundStyle(ink(health))
+    }
+
+    private func word(_ text: String, health: HealthLevel?) -> some View {
+        Text(text).font(.title.weight(.semibold)).lineLimit(1).fixedSize().foregroundStyle(ink(health))
+    }
+
+    /// A card washed in its Health Level's tint writes its figure in that level's readable ink.
+    private func ink(_ health: HealthLevel?) -> Color {
+        guard let health, health >= .warning else { return .primary }
+        return health.tint.readableInk(on: .tintedFill(MetricCard<EmptyView>.emphasisFill), minimum: 4.5)
+    }
+
+    // MARK: Tiles
+
+    private var diskTile: some View {
+        let d = metrics.disk
+        return OverviewTile(title: d?.volumeName ?? "Startup disk", style: .disk) {
+            if let d, d.totalBytes > 0 {
+                Text("\(Format.bytesShort(d.usedBytes)) / \(Format.bytesShort(d.totalBytes))")
+            }
+        } content: {
+            if let d, d.totalBytes > 0 {
+                let fraction = Double(d.usedBytes) / Double(d.totalBytes)
+                MeterBar(fraction: fraction, tint: MetricStyle.disk.tint)
+                Text("\(Format.bytesShort(d.availableBytes)) free · \(Format.percent(fraction * 100)) used")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("No volume reporting capacity.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func batteryTile(_ b: BatteryReading) -> some View {
+        let state = b.isCharging ? "Charging" : (b.onACPower ? "On AC" : "On battery")
+        let remaining = b.minutesRemaining.map {
+            b.isCharging ? "\(Format.duration(minutes: $0)) to full" : "\(Format.duration(minutes: $0)) left"
+        }
+        let detail = [remaining, b.cycleCount.map { "\($0) cycles" },
+                      b.condition.map { "Condition \(Format.batteryCondition($0).lowercased())" },
+                      b.maximumCapacityPercent.map { "Capacity \(Format.percent($0))" }]
+            .compactMap { $0 }.joined(separator: " · ")
+        let condition = b.condition?.health
+        return OverviewTile(title: "Battery", style: .battery) {
+            Label("\(state) · \(Format.percent(b.percent))",
+                  systemImage: b.onACPower ? "bolt.fill" : "battery.50percent")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(condition.map { $0 >= .warning } == true
+                                 ? condition!.tint.readableInk(on: .card, minimum: 4.5) : Color.secondary)
+        } content: {
+            MeterBar(fraction: b.percent / 100, tint: MetricStyle.battery.tint)
+            if !detail.isEmpty { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+        }
+    }
+
+    private var thermalTile: some View {
+        let s = metrics.sensors
+        let fan = s?.fans.map(\.rpm).max()
+        // Each column only when this Mac reports it (ADR 0002 fail-soft); none at all hides the row.
+        let columns: [(String, String?)] = [
+            ("CPU", s?.cpuCelsius.map(Format.celsius)),
+            ("SSD", s?.ssdCelsius.map(Format.celsius)),
+            ("Battery", s?.batteryCelsius.map(Format.celsius)),
+            ("Fan", fan.map { $0 < 1 ? "Stopped" : "\(Format.decimal($0, places: 0)) rpm" }),
+        ].filter { $0.1 != nil }
+        return OverviewTile(title: "Thermal", style: .temperature) {
+            if let t = metrics.thermal {
+                Text(Format.thermal(t)).foregroundStyle(t.health.tint.readableInk(on: .card, minimum: 4.5))
+            }
+        } content: {
+            if columns.isEmpty {
+                Text("Thermal state from macOS; no temperature sensors to read.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            } else {
+                HStack(spacing: 16) {
+                    ForEach(columns, id: \.0) { label, value in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(label).font(.caption).foregroundStyle(.secondary)
+                            Text(value ?? "").font(.callout.weight(.semibold)).monospacedDigit()
+                        }
+                        .lineLimit(1)
+                        .accessibilityElement(children: .combine)
+                    }
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// Three stats share a third of the Overview grid, so at the 980pt window minimum the roomy
-    /// variant does not fit. Rather than shrink the figure toward illegibility, drop to a smaller
-    /// type step — the reading stays whole either way.
-    private func internetStat(value: String, label: String, icon: String, tint: Color) -> some View {
-        ViewThatFits(in: .horizontal) {
-            internetStat(value: value, label: label, icon: icon, tint: tint, font: .title3)
-            internetStat(value: value, label: label, icon: icon, tint: tint, font: .callout)
-        }
-    }
+    // MARK: Processes and activity
 
-    private func internetStat(value: String, label: String, icon: String, tint: Color,
-                              font: Font) -> some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: icon).foregroundStyle(tint).font(icon == "circle.fill" ? .system(size: 8) : .callout)
-                Text(value).font(font.weight(.semibold)).monospacedDigit().lineLimit(1).fixedSize()
-            }
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func internetMessage(_ h: NetworkHealthReading?) -> String {
-        guard let h else { return "Checking your connection…" }
-        if h.connectivity == .offline { return "This Mac is offline." }
-        switch h.health {
-        case .healthy: return "Your connection looks good."
-        case .warning: return "Your connection is slower than usual."
-        case .critical: return "Your connection has serious problems."
-        case .unknown: return "Checking your connection…"
-        }
-    }
-
-    /// Mockup "Recent Activity": latest events since launch; "View All" opens the Timeline.
-    private var recentActivity: some View {
+    private var topProcesses: some View {
         VStack(alignment: .leading, spacing: 10) {
+            TopProcessList(metrics: metrics, sort: $processSort, count: 6)
+            Spacer(minLength: 0)
+            Button("All \(metrics.processes.count) processes →") { showProcesses(processSort) }
+                .buttonStyle(.link)
+                .font(.callout)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardBackground()
+    }
+
+    /// The latest Timeline Events, newest first; "View All" opens the Timeline.
+    private var recentActivity: some View {
+        let latest = Array(metrics.recentEvents.suffix(5).reversed())
+        return VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Image(systemName: MetricStyle.timeline.symbol).foregroundStyle(.secondary).font(.title3).frame(width: 24)
                 Text("Recent Activity").font(.headline)
                 Spacer()
-                Button("View All", action: showTimeline).controlSize(.small)
+                Button("View All") { showTimeline(nil) }.buttonStyle(.link).font(.callout)
             }
-            let latest = Array(metrics.recentEvents.suffix(5).reversed())
+            .padding(.bottom, 4)
             if latest.isEmpty {
-                Text("Nothing notable yet.").foregroundStyle(.secondary)
+                Text("Nothing notable yet.").font(.callout).foregroundStyle(.secondary)
             } else {
-                ForEach(latest) { EventRow(event: $0).font(.callout) }
+                ForEach(Array(latest.enumerated()), id: \.element.id) { index, event in
+                    if index > 0 { Divider() }
+                    ActivityRow(event: event)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -315,22 +283,85 @@ struct OverviewView: View {
     }
 }
 
-/// Rounded usage bar (mockup disk bar).
-struct UsageBar: View {
-    let fraction: Double
-    let tint: Color
+/// Icon · title with a trailing figure · a bar or figures below. Row 2 of the Overview.
+private struct OverviewTile<Trailing: View, Content: View>: View {
+    let title: String
+    let style: MetricStyle
+    @ViewBuilder let trailing: Trailing
+    @ViewBuilder let content: Content
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule().fill(LinearGradient(colors: [tint.opacity(0.8), tint], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: geo.size.width * min(max(fraction, 0), 1))
+        HStack(spacing: 14) {
+            Image(systemName: style.symbol).foregroundStyle(style.tint).font(.title3).frame(width: 24)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(title).font(.headline).lineLimit(1)
+                    Spacer(minLength: 8)
+                    trailing.font(.callout).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+                }
+                content
             }
         }
-        .frame(height: 10)
-        .accessibilityElement()
-        .accessibilityLabel("Used")
-        .accessibilityValue(Format.percent(fraction * 100))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .cardBackground(padding: 14)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Time · severity and title · detail, in the design's columns.
+private struct ActivityRow: View {
+    let event: TimelineEvent
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(event.time, format: .dateTime.hour().minute())
+                .font(.callout).monospacedDigit().foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 7) {
+                    SeverityMark(level: event.severity, font: .caption2)
+                    Text(event.title).fontWeight(.medium).lineLimit(1)
+                }
+                if let detail = event.detail {
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Children side by side at fixed shares of the width (equal by default), all as tall as the
+/// tallest. `Grid` cannot do a 5:7 split, and an `HStack` hands width to whichever child asks.
+private struct WeightedHStack: Layout {
+    var weights: [CGFloat] = []
+    var spacing: CGFloat = 16
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 900
+        let height = zip(subviews, widths(width, count: subviews.count))
+            .map { $0.sizeThatFits(ProposedViewSize(width: $1, height: nil)).height }
+            .max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths(bounds.width, count: subviews.count)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
+    }
+
+    /// Weights that do not match the child count (a tile hidden on this Mac) fall back to equal shares.
+    private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
+        guard count > 0 else { return [] }
+        let shares = weights.count == count ? weights : Array(repeating: 1, count: count)
+        let usable = max(total - spacing * CGFloat(count - 1), 0)
+        let sum = shares.reduce(0, +)
+        return shares.map { usable * $0 / sum }
     }
 }
