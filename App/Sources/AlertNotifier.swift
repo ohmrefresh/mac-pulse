@@ -22,12 +22,12 @@ final class AlertNotifier {
         await refreshAuthorization()
     }
 
-    func deliver(_ event: AlertEvent) {
+    func deliver(_ event: AlertEvent, unit: TemperatureUnit = .celsius) {
         guard event.kind == .fired, event.shouldNotify else { return }
         let rule = event.rule
         let content = UNMutableNotificationContent()
         content.title = rule.name
-        content.body = "\(rule.metric.displayName) is \(rule.metric.format(event.value))"
+        content.body = "\(rule.metric.displayName) is \(Format.alertValue(rule.metric, event.value, unit: unit))"
             + (rule.duration > 0 ? " (held for \(Int(rule.duration)) s)." : ".")
         if rule.severity == .critical { content.sound = .default }
         // Same identifier per rule: a repeat replaces the previous banner instead of stacking.

@@ -32,6 +32,12 @@ final class AppSettings {
     var lowDiskGB: Double { didSet { save(lowDiskGB, .lowDiskGB); pushHealthConfig() } }
     var hotCPUCelsius: Double { didSet { save(hotCPUCelsius, .hotCPUCelsius); pushHealthConfig() } }
 
+    /// How temperatures are shown everywhere, the Menu Bar included. Display only: readings,
+    /// history and Alert Rule thresholds stay in °C.
+    var temperatureUnit: TemperatureUnit {
+        didSet { save(temperatureUnit.rawValue, .temperatureUnit) }
+    }
+
     var samplingInterval: TimeInterval {
         didSet { save(samplingInterval, .samplingInterval); metrics.setSamplingInterval(samplingInterval) }
     }
@@ -113,6 +119,8 @@ final class AppSettings {
         menuBarItems = (defaults.stringArray(forKey: Key.menuBarItems.rawValue)?.compactMap(MenuBarItem.init(rawValue:)))
             ?? MenuBarItem.defaults
         menuBarShowsIcons = defaults.object(forKey: Key.menuBarShowsIcons.rawValue) as? Bool ?? true
+        temperatureUnit = defaults.string(forKey: Key.temperatureUnit.rawValue).flatMap(TemperatureUnit.init(rawValue:))
+            ?? .celsius
         samplingInterval = defaults.object(forKey: Key.samplingInterval.rawValue) as? TimeInterval ?? 1
         showDockIcon = defaults.bool(forKey: Key.showDockIcon.rawValue)
         probeTargets = Self.loadTargets(defaults)
@@ -241,6 +249,7 @@ final class AppSettings {
         case cpuWarningPercent, cpuCriticalPercent, gatewayLatencyMs, dnsSlowMs, lowDiskGB, hotCPUCelsius
         case offeredTemplates
         case didOfferLaunchAtLogin
+        case temperatureUnit
     }
 
     private func save(_ value: Any, _ key: Key) { defaults.set(value, forKey: key.rawValue) }

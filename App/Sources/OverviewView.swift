@@ -11,6 +11,7 @@ struct OverviewView: View {
     let showProcesses: (ProcessSort) -> Void
     let showTimeline: (TimelineCategory?) -> Void
     @AppStorage("overviewProcessSort") private var processSort = ProcessSort.cpu
+    @Environment(\.temperatureUnit) private var unit
 
     var body: some View {
         ScrollView {
@@ -217,9 +218,9 @@ struct OverviewView: View {
         let fan = s?.fans.map(\.rpm).max()
         // Each column only when this Mac reports it (ADR 0002 fail-soft); none at all hides the row.
         let columns: [(String, String?)] = [
-            ("CPU", s?.cpuCelsius.map(Format.celsius)),
-            ("SSD", s?.ssdCelsius.map(Format.celsius)),
-            ("Battery", s?.batteryCelsius.map(Format.celsius)),
+            ("CPU", s?.cpuCelsius.map { Format.temperature($0, unit) }),
+            ("SSD", s?.ssdCelsius.map { Format.temperature($0, unit) }),
+            ("Battery", s?.batteryCelsius.map { Format.temperature($0, unit) }),
             ("Fan", fan.map { $0 < 1 ? "Stopped" : "\(Format.decimal($0, places: 0)) rpm" }),
         ].filter { $0.1 != nil }
         return OverviewTile(title: "Thermal", style: .temperature) {

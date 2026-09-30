@@ -126,7 +126,7 @@ import PulseEngine
 @Suite struct FormatTests {
     @Test func units() {
         #expect(Format.percent(21.6) == "22%")
-        #expect(Format.celsius(48.4) == "48°C")
+        #expect(Format.temperature(48.4, .celsius) == "48°C")
         #expect(Format.health(.critical) == "Critical")
     }
 

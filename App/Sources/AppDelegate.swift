@@ -30,7 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         statusItem = item
 
         settings.onMenuBarChange = { [weak self] in self?.updateStatusTitle() }
-        metrics.onAlert = { [weak self] event in self?.notifier.deliver(event) }
+        metrics.onAlert = { [weak self] event in
+            guard let self else { return }
+            notifier.deliver(event, unit: settings.temperatureUnit)
+        }
         settings.onAlertEnabled = { [weak self] in
             guard let notifier = self?.notifier else { return }
             Task { await notifier.requestAuthorizationIfNeeded() }
@@ -117,7 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             let items = settings.menuBarItems
             // With every metric disabled, show an icon so the app stays reachable.
             let concern = metrics.concern
-            let segments = items.isEmpty ? [] : MenuBarFormatter.segments(items, metrics.menuBarInputs, concern: concern)
+            let inputs = metrics.menuBarInputs
+            let segments = items.isEmpty ? [] : Format.menuBarSegments(
+                MenuBarFormatter.segments(items, inputs, concern: concern),
+                cpuCelsius: inputs.cpuCelsius, unit: settings.temperatureUnit)
             let key = "\(settings.menuBarShowsIcons)|\(concern?.level.rawValue ?? 0)|"
                 + segments.map(\.text).joined(separator: MenuBarFormatter.separator)
             if key != shownTitleKey {
@@ -226,7 +232,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             popover.performClose(nil)
         } else {
             popover.contentViewController = NSHostingController(
-                rootView: PopoverView(metrics: metrics, openDashboard: { [weak self] in self?.openDashboard() }))
+                rootView: PopoverView(metrics: metrics, openDashboard: { [weak self] in self?.openDashboard() })
+                    // Rebuilt on every open, so a unit changed in Settings shows next time.
+                    .environment(\.temperatureUnit, settings.temperatureUnit))
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }

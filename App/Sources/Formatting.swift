@@ -3,10 +3,77 @@ import PulseCore
 import PulseCollectors
 import PulseEngine
 
+/// How temperatures are shown. Display only: everything measured or stored is °C.
+enum TemperatureUnit: String, CaseIterable, Identifiable {
+    case celsius, fahrenheit
+
+    var id: Self { self }
+    var symbol: String { self == .celsius ? "°C" : "°F" }
+
+    func fromCelsius(_ value: Double) -> Double { self == .celsius ? value : value * 9 / 5 + 32 }
+    func toCelsius(_ value: Double) -> Double { self == .celsius ? value : (value - 32) * 5 / 9 }
+    /// A difference in °C in this unit.
+    func scale(_ celsiusDelta: Double) -> Double { self == .celsius ? celsiusDelta : celsiusDelta * 9 / 5 }
+
+    /// A threshold as shown for editing: whole degrees in °F, the stored value itself in °C.
+    func threshold(fromCelsius celsius: Double) -> Double { self == .celsius ? celsius : fromCelsius(celsius).rounded() }
+
+    /// What to store for a threshold typed in this unit. °F entries are kept to the nearest half
+    /// °C: whole °C would snap 200 °F to 93 °C, which reads back as 199 °F, while a half degree
+    /// (at most 0.25 °C = 0.45 °F off) always reads back as the whole °F typed. °C mode then shows
+    /// it as "93.5", never truncated.
+    func storedCelsius(entered value: Double) -> Double {
+        self == .celsius ? value : (toCelsius(value) * 2).rounded() / 2
+    }
+
+    /// Where a temperature axis over `domain` (°C, as charts plot it) puts its gridlines: round
+    /// values *in this unit* (0/25/50…°C, 40/80/120…°F), returned as °C positions so the data
+    /// stays in °C and only the labels convert.
+    func axisTicks(celsius domain: ClosedRange<Double>) -> [Double] {
+        let step: Double = self == .celsius ? 25 : 40
+        let low = fromCelsius(domain.lowerBound), high = fromCelsius(domain.upperBound)
+        return stride(from: (low / step).rounded(.up) * step, through: high, by: step).map(toCelsius)
+    }
+}
+
+private struct TemperatureUnitKey: EnvironmentKey {
+    static let defaultValue = TemperatureUnit.celsius
+}
+
+extension EnvironmentValues {
+    /// Set from `AppSettings` at the popover and dashboard roots.
+    var temperatureUnit: TemperatureUnit {
+        get { self[TemperatureUnitKey.self] }
+        set { self[TemperatureUnitKey.self] = newValue }
+    }
+}
+
 enum Format {
     static func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
 
-    static func celsius(_ value: Double) -> String { "\(Int(value.rounded()))°C" }
+    /// "45°C" or "113°F". Every temperature the user reads goes through this; readings, history,
+    /// thresholds and chart data all stay in °C.
+    static func temperature(_ celsius: Double, _ unit: TemperatureUnit) -> String {
+        let figure = temperatureFigure(celsius, unit)
+        return figure.number + figure.unit
+    }
+
+    /// "45°C" split for `FigureText`: ("45", "°C").
+    static func temperatureFigure(_ celsius: Double, _ unit: TemperatureUnit) -> (number: String, unit: String) {
+        ("\(Int(unit.fromCelsius(celsius).rounded()))", unit.symbol)
+    }
+
+    /// A threshold: "95°C", "93.5°C" (a half degree kept from a °F entry), or whole "200°F".
+    static func temperatureThreshold(_ celsius: Double, _ unit: TemperatureUnit) -> String {
+        guard unit == .celsius else { return temperature(celsius, unit) }
+        let whole = celsius.rounded() == celsius
+        return "\(decimal(celsius, places: whole ? 0 : 1))°C"
+    }
+
+    /// A temperature *difference* ("2°C", "4°F"): scaled, never offset by 32. Magnitude only.
+    static func temperatureChange(_ celsiusDelta: Double, _ unit: TemperatureUnit) -> String {
+        "\(Int(abs(unit.scale(celsiusDelta)).rounded()))\(unit.symbol)"
+    }
 
     /// Card-sized: whole units from 10 up ("575 GB", "4.5 GB").
     static func bytesShort(_ value: Int64) -> String {
@@ -105,6 +172,43 @@ enum Format {
         }
     }
 
+    /// How long a closed Episode lasted: "45 s", "1 m 17 s", "33 m", "1 h 5 m".
+    static func lasted(_ seconds: TimeInterval) -> String {
+        let total = Int(max(seconds, 0).rounded())
+        let (hours, minutes, secs) = (total / 3_600, total % 3_600 / 60, total % 60)
+        if hours > 0 { return minutes > 0 ? "\(hours) h \(minutes) m" : "\(hours) h" }
+        if minutes > 0 { return secs > 0 ? "\(minutes) m \(secs) s" : "\(minutes) m" }
+        return "\(secs) s"
+    }
+
+    /// How long a process has been running, to two units at most: "1d 23h", "12h 37m", "2m", "<1m".
+    /// A start time ahead of `now` (clock change) reads as just started.
+    static func running(since start: Date, now: Date = Date()) -> String {
+        let total = Int(max(now.timeIntervalSince(start), 0))
+        let (days, hours, minutes) = (total / 86_400, total % 86_400 / 3_600, total % 3_600 / 60)
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(minutes)m" }
+        return minutes > 0 ? "\(minutes)m" : "<1m"
+    }
+
+    /// A Timeline day heading: "Today · Wed 30 Sep", "Yesterday · Tue 29 Sep", then the date alone.
+    static func dayHeading(_ day: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let date = day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+        if calendar.isDate(day, inSameDayAs: now) { return "Today · \(date)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(day, inSameDayAs: yesterday) { return "Yesterday · \(date)" }
+        return date
+    }
+
+    /// When a rule last fired: "Today 14:02", "Yesterday 09:10", else "Mon 28 Sep".
+    static func lastFired(_ time: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        let clock = time.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(time, inSameDayAs: now) { return "Today \(clock)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(time, inSameDayAs: yesterday) { return "Yesterday \(clock)" }
+        return time.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
     /// The signal's name inside a sentence: "Memory pressure is Warning".
     static func concernName(_ signal: ConcernSignal) -> String {
         switch signal {
@@ -194,6 +298,29 @@ enum Format {
         let text = bytesShort(value)
         guard let space = text.lastIndex(of: " ") else { return (text, nil) }
         return (String(text[..<space]), String(text[text.index(after: space)...]))
+    }
+
+    /// The package renders the CPU temperature segment in °C; this rewrites it in the user's unit,
+    /// keeping "--" for a missing reading. Other segments pass through.
+    static func menuBarSegments(_ segments: [MenuBarSegment], cpuCelsius: Double?,
+                                unit: TemperatureUnit) -> [MenuBarSegment] {
+        guard unit != .celsius else { return segments }
+        return segments.map { segment in
+            guard segment.item == .temperature else { return segment }
+            var copy = segment
+            copy.text = cpuCelsius.map { temperature($0, unit) } ?? "--\(unit.symbol)"
+            return copy
+        }
+    }
+
+    /// An alert rule's threshold or fired value: `AlertMetric.format`, but temperatures in `unit`.
+    static func alertValue(_ metric: AlertMetric, _ value: Double, unit: TemperatureUnit) -> String {
+        metric == .cpuTemperatureC && value.isFinite ? temperature(value, unit) : metric.format(value)
+    }
+
+    /// An alert rule's threshold: as `alertValue`, but a half-degree °C threshold keeps its ".5".
+    static func alertThreshold(_ metric: AlertMetric, _ value: Double, unit: TemperatureUnit) -> String {
+        metric == .cpuTemperatureC && value.isFinite ? temperatureThreshold(value, unit) : metric.format(value)
     }
 
     static func batteryState(_ b: BatteryReading) -> String {
@@ -297,7 +424,7 @@ extension LiveMetrics {
     }
 
     /// What the Concern's signal measures right now. Parts this Mac does not report are left out.
-    func concernFigures(_ signal: ConcernSignal) -> String? {
+    func concernFigures(_ signal: ConcernSignal, unit: TemperatureUnit = .celsius) -> String? {
         switch signal {
         case .cpu:
             guard let cpu else { return nil }
@@ -323,8 +450,42 @@ extension LiveMetrics {
             return "macOS recommends service\(capacity)."
         case .thermal:
             guard let thermal else { return nil }
-            let celsius = sensors?.cpuCelsius.map { ", CPU at \(Format.celsius($0))" } ?? ""
+            let celsius = sensors?.cpuCelsius.map { ", CPU at \(Format.temperature($0, unit))" } ?? ""
             return "Thermal state \(Format.thermal(thermal))\(celsius)."
+        }
+    }
+}
+
+extension TimelineCategory {
+    /// The name a person reads. `battery` covers plugging in and charging as well as charge level,
+    /// so it reads "Power"; the raw value is persisted and stays `battery`.
+    var displayName: String {
+        switch self {
+        case .cpu: "CPU"
+        case .memory: "Memory"
+        case .network: "Network"
+        case .disk: "Disk"
+        case .battery: "Power"
+        case .thermal: "Thermal"
+        case .connectivity: "Connectivity"
+        case .process: "Process"
+        case .system: "System"
+        case .alert: "Alert"
+        }
+    }
+
+    /// The tint and symbol of the metric family the category's events come from.
+    var style: MetricStyle {
+        switch self {
+        case .cpu: .cpu
+        case .memory: .memory
+        case .network, .connectivity: .network
+        case .disk: .disk
+        case .battery: .battery
+        case .thermal: .temperature
+        case .process: .processes
+        case .system: .timeline
+        case .alert: .alerts
         }
     }
 }

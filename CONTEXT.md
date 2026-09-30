@@ -81,6 +81,9 @@ _Avoid_: recent alerts
 **Top Processes**:
 The top 10 processes by CPU and top 10 by memory at a process scan. The only processes kept in history.
 
+**Volume**:
+A mounted disk the Mac can report capacity for — the startup disk plus any external or network volumes. Shown live only; only the startup disk's free space is kept in history.
+
 **Primary Interface**:
 The network interface carrying the default route (e.g. en0). Throughput is measured on it alone.
 
@@ -157,6 +160,11 @@ Inactive → Pending → Firing → Resolved. Firing needs the condition held fo
 **Timeline Event**:
 A recorded moment something changed: a Health Level transition, alert firing/resolving, connectivity change, notable process change, or system event (sleep/wake, power source, thermal).
 _Avoid_: log entry, activity
+Battery events (power source changes) are shown to users under the category name **Power**.
+
+**Episode**:
+One signal's stretch away from Healthy: from its first non-Healthy Timeline Event to the Healthy one that ends it. Ongoing until then.
+_Avoid_: incident, outage
 
 **Template**:
 A predefined Alert Rule offered once; editing or deleting it is permanent, and only templates the user has never seen are added later.

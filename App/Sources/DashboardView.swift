@@ -48,6 +48,17 @@ enum DashboardSection: String, CaseIterable, Identifiable {
 
     var symbol: String { self == .overview ? "house" : style.symbol }
 
+    /// Sections that filter their own content by the toolbar search; typing anywhere else opens Processes.
+    var ownsSearch: Bool { self == .timeline || self == .developer }
+
+    var searchPrompt: String {
+        switch self {
+        case .timeline: "Search events"
+        case .developer: "Filter containers, ports, processes"
+        default: "Search processes"
+        }
+    }
+
     /// PRD §17: ⌘1–⌘4.
     var shortcut: KeyEquivalent? {
         switch self {
@@ -66,7 +77,8 @@ struct DashboardView: View {
     let notifier: AlertNotifier
     @State private var selection: DashboardSection? = .overview
     @State private var showDiagnostics = false
-    /// Toolbar search; typing jumps to Processes, which filters by it.
+    /// Toolbar search. Timeline filters its events by it and Developer its containers and ports; from
+    /// any other section typing jumps to Processes, which filters by it.
     @State private var search = ""
     @State private var timelineCategory: TimelineCategory?
     /// Column Processes opens on; the Overview's Concern banner sets it to memory for a memory Concern.
@@ -117,15 +129,19 @@ struct DashboardView: View {
                     })
                 case .network: NetworkDetailView(metrics: metrics)
                 case .processes: ProcessesView(metrics: metrics, search: search, initialSort: processSort)
-                case .developer: DeveloperView(metrics: metrics, settings: settings)
+                case .developer: DeveloperView(metrics: metrics, settings: settings, search: search)
                 case .storage: StorageView(metrics: metrics)
                 case .battery: BatteryView(metrics: metrics)
-                case .sensors: SensorsView(metrics: metrics, showThermalHistory: {
+                case .sensors: SensorsView(metrics: metrics, settings: settings, showThermalHistory: {
                         timelineCategory = .thermal
                         selection = .timeline
                     })
-                case .alerts: AlertsView(metrics: metrics, settings: settings, notifier: notifier)
-                case .timeline: TimelineSectionView(metrics: metrics, category: $timelineCategory)
+                case .alerts: AlertsView(metrics: metrics, settings: settings, notifier: notifier,
+                                         showTimeline: {
+                                             timelineCategory = .alert
+                                             selection = .timeline
+                                         })
+                case .timeline: TimelineSectionView(metrics: metrics, category: $timelineCategory, search: search)
                 }
             }
             .navigationTitle((selection ?? .overview).rawValue)
@@ -133,15 +149,19 @@ struct DashboardView: View {
             .background(Palette.window)
             .toolbarBackground(Palette.window, for: .windowToolbar)
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
+        .searchable(text: $search, placement: .toolbar,
+                    prompt: (selection ?? .overview).searchPrompt)
         .onChange(of: search) { _, query in
-            if !query.isEmpty { selection = .processes }
+            if !query.isEmpty, selection?.ownsSearch != true { selection = .processes }
         }
-        // A banner-chosen sort lasts one visit; Processes otherwise opens on CPU.
-        .onChange(of: selection) { old, _ in
+        .onChange(of: selection) { old, new in
+            // A banner-chosen sort lasts one visit; Processes otherwise opens on CPU.
             if old == .processes { processSort = .cpu }
+            // An event or port query means nothing to a process list, and the reverse.
+            if old?.ownsSearch == true || new?.ownsSearch == true { search = "" }
         }
         .sheet(isPresented: $showDiagnostics) { DiagnosticsView(metrics: metrics) }
+        .environment(\.temperatureUnit, settings.temperatureUnit)
         .frame(minWidth: 980, minHeight: 620)
     }
 

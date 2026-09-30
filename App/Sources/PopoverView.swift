@@ -9,6 +9,7 @@ struct PopoverView: View {
     let metrics: LiveMetrics
     let openDashboard: () -> Void
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.temperatureUnit) private var temperatureUnit
     @AppStorage("popoverProcessSort") private var processSort = ProcessSort.cpu
 
     var body: some View {
@@ -190,7 +191,8 @@ struct PopoverView: View {
             Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 26)
         } value: {
             if let celsius {
-                FigureText(number: "\(Int(celsius.rounded()))", unit: "°C")
+                let figure = Format.temperatureFigure(celsius, temperatureUnit)
+                FigureText(number: figure.number, unit: figure.unit)
             } else if let t = metrics.thermal {
                 // No °C on this Mac: the Thermal State itself is the reading.
                 FigureText(number: Format.thermal(t), unit: nil, size: .title3)

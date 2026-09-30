@@ -53,6 +53,22 @@ import PulseCollectors
         #expect(m.perCoreHistory.count == 3)
     }
 
+    @Test func volumesFollowTheDiskJobAndKeepOnNilTicks() {
+        let m = LiveMetrics()
+        var s = Snapshot()
+        let root = DiskReading(volumeName: "Macintosh HD", totalBytes: 100, availableBytes: 40, mountPath: "/")
+        let usb = DiskReading(volumeName: "USB", totalBytes: 10, availableBytes: 5, mountPath: "/Volumes/USB",
+                              isRemovable: true)
+        s.volumes = [root, usb]
+        m.apply(s)
+        #expect(m.volumes == [root, usb])
+        m.apply(Snapshot())             // disk job not due: keep the last list
+        #expect(m.volumes == [root, usb])
+        s.volumes = [root]              // unmounted
+        m.apply(s)
+        #expect(m.volumes == [root])
+    }
+
     @Test func batteryAndTemperatureHistoriesAndCPUHealth() {
         let m = LiveMetrics()
         var s = Snapshot()

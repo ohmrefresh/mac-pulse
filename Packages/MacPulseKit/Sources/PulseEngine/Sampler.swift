@@ -9,6 +9,8 @@ public struct Snapshot: Sendable {
     public var memory: MemoryReading?
     public var network: NetworkReading?
     public var disk: DiskReading?
+    /// Every mounted Volume, startup disk first; sampled with `disk`.
+    public var volumes: [DiskReading]?
     public var battery: BatteryReading?
     public var thermal: ThermalState?
     public var processes: [ProcessRow]?
@@ -127,6 +129,7 @@ actor Sampler {
         }
         if due.contains(.disk) {
             s.disk = disk.sample()
+            s.volumes = DiskCollector.sampleVolumes(startup: s.disk)
             s.peripheralBatteries = PeripheralBatteryCollector.sample()
         }
         if due.contains(.sensors) {

@@ -13,6 +13,8 @@ public final class LiveMetrics {
     public private(set) var memory: MemoryReading?
     public private(set) var network: NetworkReading?
     public private(set) var disk: DiskReading?
+    /// Mounted Volumes, startup disk first. Live only; refreshed with the disk job (60 s, or on mount/unmount).
+    public private(set) var volumes: [DiskReading] = []
     /// Nil on Macs without a battery, or before the first power sample.
     public private(set) var battery: BatteryReading?
     public private(set) var thermal: ThermalState?
@@ -130,7 +132,7 @@ public final class LiveMetrics {
         let sampler = self.sampler
         let prober = self.prober
         let recorder = self.recorder
-        post(TimelineEvent(time: Date(), category: .system, severity: .healthy, title: "Monitoring started"))
+        post(Self.monitoringStartedEvent(at: Date()))
         Task { [weak self] in
             await recorder?.setErrorHandler { message in
                 Task { @MainActor in self?.historyError = message }
@@ -407,6 +409,10 @@ public final class LiveMetrics {
         if firing != firingAlertIDs { firingAlertIDs = firing }
     }
 
+    nonisolated static func monitoringStartedEvent(at now: Date) -> TimelineEvent {
+        TimelineEvent(time: now, category: .system, severity: .healthy, title: TimelineEpisodes.monitoringStartedTitle)
+    }
+
     static func timelineEvent(for e: AlertEvent) -> TimelineEvent {
         let r = e.rule
         let comparator = switch r.comparator { case .above: ">"; case .atLeast: "≥"; case .below: "<"; case .atMost: "≤" }
@@ -414,7 +420,7 @@ public final class LiveMetrics {
         let detail = "\(r.metric.displayName) \(r.metric.format(e.value)) · rule \(comparator) \(r.metric.format(r.threshold))\(held)"
         return TimelineEvent(time: e.time, category: .alert,
                              severity: e.kind == .fired ? r.severity.health : .healthy,
-                             title: e.kind == .fired ? "\(r.name)" : "\(r.name) resolved", detail: detail)
+                             title: e.kind == .fired ? "\(r.name)" : "\(r.name)\(TimelineEpisodes.resolvedSuffix)", detail: detail)
     }
 
     func apply(_ reading: NetworkHealthReading) {
@@ -468,6 +474,7 @@ public final class LiveMetrics {
             upHistory.append(v.upBytesPerSec)
         }
         if let v = s.disk { disk = v }
+        if let v = s.volumes, v != volumes { volumes = v }
         if let v = s.battery { battery = v; batteryHistory.append(v.percent) }
         if let v = s.thermal {
             if v != thermal { recordThermalChange(v, at: Date()) }

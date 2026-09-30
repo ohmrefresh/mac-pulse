@@ -23,9 +23,10 @@ It works at three levels, and you can stop at whichever one answers your questio
 Beyond live numbers, it:
 
 - records history and re-buckets it into charts across Live, 1 h, 6 h, 24 h, 7 d and 30 d;
-- writes Timeline Events so you can see *when* something changed, not just that it is wrong now;
+- writes Timeline Events so you can see *when* something changed, not just that it is wrong now, and joins each warning to its recovery so you can see how long it lasted;
 - runs Diagnostics (⌘R) over the last 15 minutes plus a fresh probe burst, where every Finding states **Observed**, **Possible cause** and **Recommendation**;
-- rolls readings into a Health Level so the summary says what is wrong before showing you six equal cards.
+- rolls readings into a Health Level so the summary says what is wrong before showing you six equal cards;
+- shows temperatures in °C or °F — one setting for the menu bar, popover and dashboard.
 
 Causes are offered as likely or possible — suggestions, not certainties. A value this Mac cannot report is hidden rather than dashed or guessed.
 
@@ -78,15 +79,15 @@ Mac Pulse is a single process. No daemon, no cloud, no account, no telemetry.
 - **Temperatures and fans** ([ADR 0002](docs/adr/0002-private-apis-for-temperature-and-fans.md)) and **CPU frequency and GPU power** ([ADR 0003](docs/adr/0003-ioreport-for-cpu-frequency-and-gpu-power.md)) come from private, undocumented interfaces. They fail soft: a failure yields a hidden row, never a crash or a wrong number, and nothing else depends on them.
 - **Notifications** are requested only when you first enable an Alert Rule. All rule templates ship disabled.
 - **A login item** is registered only when the app is running from `/Applications`.
-- **Network** activity is an ICMP ping to the IPv4 host you set in Settings, plus a UDP DNS query for a fixed popular name sent to your Mac's own configured resolver — the point is to time *your* resolver, not to look anything up. The public IP lookup is **off by default** and, when enabled, only ever contacts 1.1.1.1.
+- **Network** activity is an ICMP ping to the one to four internet targets you set in Settings (IPv4, IPv6 or a hostname; 1.1.1.1 and 8.8.8.8 by default, and a hostname is resolved at most every five minutes), plus a UDP DNS query for a fixed popular name sent to your Mac's own configured resolver — the point is to time *your* resolver, not to look anything up. The public IP lookup is **off by default** and, when enabled, only ever contacts 1.1.1.1.
 - **History** is stored locally in `~/Library/Application Support/MacPulse/history.sqlite`, with retention you choose from 1 hour to 30 days, and it can be cleared from Settings.
 - **Wi-Fi network changes are deliberately not tracked**, because that would require Location Services.
 
 ## Status
 
-Pre-release, version 0.1.0. The menu bar, popover, dashboard, history, timeline, alerts and diagnostics all work — see the [changelog](CHANGELOG.md).
+Pre-release, version 0.2.0. The menu bar, popover, dashboard, history, timeline, alerts and diagnostics all work — see the [changelog](CHANGELOG.md).
 
-There is no signed or notarized release yet, so building from source is the only way to run it.
+Disk images are on the [Releases](https://github.com/ohmrefresh/mac-pulse/releases) page; each release's notes say whether that build is signed and notarized. An ad-hoc signed build is blocked on first launch: right-click Mac Pulse in Applications and choose Open. You can also build from source.
 
 ## Docs
 

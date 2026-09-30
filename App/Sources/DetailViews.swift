@@ -25,6 +25,7 @@ struct PerformanceView: View {
     @State private var cpuMode: CPUChartMode = .cores
     /// The Total chart's plot area, which the heatmap below it lines up with.
     @State private var cpuPlot: CGRect?
+    @Environment(\.temperatureUnit) private var unit
 
     private enum Anchor: Hashable { case cpu, gpu, memory, thermal }
 
@@ -92,9 +93,9 @@ struct PerformanceView: View {
             // °C when the private sensors report one (ADR 0002), otherwise macOS's own Thermal State.
             KPITile(title: celsius == nil ? "Thermal" : "CPU die", style: .temperature,
                     health: metrics.thermal?.health,
-                    value: celsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal),
+                    value: celsius.map { Format.temperature($0, unit) } ?? metrics.thermal.map(Format.thermal),
                     trend: celsius == nil ? nil : metrics.temperatureTrend,
-                    trendFormat: { "\(Int(abs($0).rounded()))°" }) {
+                    trendFormat: { [unit] in Format.temperatureChange($0, unit) }) {
                 if celsius != nil {
                     Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 44,
                               lineWidth: 2)
@@ -283,12 +284,13 @@ struct PerformanceView: View {
         } else if range == .live {
             TimedLineChart(lines: thermalLines.filter { !$0.series.samples.isEmpty }
                                .map { .init(name: $0.name, samples: $0.series.samples, tint: $0.style.tint) },
-                           window: liveWindow, maximum: 100, format: { "\(Int($0))°" })
+                           window: liveWindow, maximum: 100, format: { [unit] in Format.temperature($0, unit) },
+                           ticks: unit.axisTicks(celsius: 0...100))
         } else {
             HistoryChart(history: metrics.history,
                          lines: thermalLines.map { .init(kind: $0.kind, name: $0.name, tint: $0.style.tint) },
-                         range: range, maximum: 100, format: { "\(Int($0))°C" },
-                         accessibilityTitle: "Temperatures")
+                         range: range, maximum: 100, format: { [unit] in Format.temperature($0, unit) },
+                         accessibilityTitle: "Temperatures", yTicks: unit.axisTicks(celsius: 0...100))
         }
     }
 
@@ -431,6 +433,8 @@ private struct TimedLineChart: View {
     let window: TimeInterval
     var maximum: Double
     var format: (Double) -> String
+    /// Gridline positions in plotted (°C) values.
+    var ticks: [Double]
 
     var body: some View {
         let end = lines.compactMap { $0.samples.last?.time }.max() ?? .now
@@ -455,7 +459,7 @@ private struct TimedLineChart: View {
             .chartYScale(domain: 0...maximum)
             .chartXAxis(.hidden)
             .chartYAxis {
-                AxisMarks { value in
+                AxisMarks(values: ticks) { value in
                     AxisGridLine()
                     AxisValueLabel { if let v = value.as(Double.self) { Text(format(v)) } }
                 }
@@ -464,81 +468,6 @@ private struct TimedLineChart: View {
             .accessibilityLabel("Temperatures: " + lines.compactMap { line in
                 line.samples.last.map { "\(line.name) \(format($0.value))" }
             }.joined(separator: ", "))
-        }
-    }
-}
-
-struct StorageView: View {
-    let metrics: LiveMetrics
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            if let d = metrics.disk {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(d.volumeName ?? "Startup disk").font(.title3.weight(.semibold))
-                    UsageBar(fraction: Double(d.usedBytes) / Double(max(d.totalBytes, 1)), tint: MetricStyle.disk.tint)
-                    Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
-                        KeyValue("Capacity", Format.bytes(d.totalBytes))
-                        KeyValue("Used", Format.bytes(d.usedBytes))
-                        KeyValue("Available", Format.bytes(d.availableBytes))
-                    }
-                    Text("Available includes purgeable space, matching Finder. Refreshed every 60 s.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .cardBackground()
-            } else {
-                ContentUnavailableView("No disk data yet", systemImage: "internaldrive")
-            }
-            Spacer()
-        }
-        .padding(24)
-    }
-}
-
-struct BatteryView: View {
-    let metrics: LiveMetrics
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                if let b = metrics.battery {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text(Format.percent(b.percent)).font(.largeTitle.weight(.semibold)).monospacedDigit()
-                            Spacer()
-                            if let c = b.condition { HealthBadge(level: c.health, label: Format.batteryCondition(c)) }
-                        }
-                        Sparkline(values: metrics.batteryHistory.values, tint: MetricStyle.battery.tint,
-                                  points: 120, domain: 0...100, height: 70)
-                        Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
-                            KeyValue("State", Format.batteryState(b))
-                            KeyValue("Condition", b.condition.map(Format.batteryCondition))
-                            KeyValue("Cycle count", b.cycleCount.map(String.init))
-                            KeyValue("Maximum capacity", b.maximumCapacityPercent.map(Format.percent))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardBackground()
-                } else {
-                    Text("This Mac has no internal battery.").foregroundStyle(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 8) { peripherals }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardBackground()
-            }
-            .padding(24)
-        }
-    }
-
-    @ViewBuilder private var peripherals: some View {
-        Text("Accessories").font(.headline)
-        if metrics.peripheralBatteries.isEmpty {
-            InlineEmpty("No Bluetooth accessories reporting a battery level.")
-        } else {
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 6) {
-                ForEach(metrics.peripheralBatteries) { KeyValue($0.name, "\($0.percent)%") }
-            }
         }
     }
 }

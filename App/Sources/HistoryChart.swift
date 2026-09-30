@@ -27,6 +27,18 @@ enum ChartRange: TimeInterval, CaseIterable, Identifiable {
     /// because temperature is not kept that long.
     static let stored: [ChartRange] = [.hour, .sixHours, .day, .week, .month]
     static let sensors: [ChartRange] = [.hour, .sixHours, .day, .week]
+
+    /// "Last 24 hours" — the span a stored-history page covers, in words.
+    var spanName: String {
+        switch self {
+        case .live: "Live"
+        case .hour: "Last hour"
+        case .sixHours: "Last 6 hours"
+        case .day: "Last 24 hours"
+        case .week: "Last 7 days"
+        case .month: "Last 30 days"
+        }
+    }
 }
 
 struct ChartRangePicker: View {
@@ -72,6 +84,11 @@ struct HistoryChart: View {
     var mirrored = false
     /// Applied to plotted values; hover details, labels and VoiceOver keep the real values.
     var scale: ChartScale = .linear
+    /// Off when the page draws its own legend (e.g. with current values).
+    var showsLegend = true
+    /// Gridline positions in plotted values; nil lets Charts choose (temperatures pass round values
+    /// in the display unit, from `TemperatureUnit.axisTicks`).
+    var yTicks: [Double]?
 
     @State private var loaded: [MetricKind: HistorySeries] = [:]
     @State private var error: String?
@@ -158,6 +175,11 @@ struct HistoryChart: View {
                     AxisGridLine()
                     AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
                 }
+            } else if let yTicks {
+                AxisMarks(values: yTicks) { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
+                }
             } else {
                 AxisMarks { value in
                     AxisGridLine()
@@ -165,7 +187,7 @@ struct HistoryChart: View {
                 }
             }
         }
-        .chartLegend(lines.count > 1 ? .visible : .hidden)
+        .chartLegend(showsLegend && lines.count > 1 ? .visible : .hidden)
         // One element for the whole chart; see TimeSeriesChart for why.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? lines.map(\.name).joined(separator: ", "))

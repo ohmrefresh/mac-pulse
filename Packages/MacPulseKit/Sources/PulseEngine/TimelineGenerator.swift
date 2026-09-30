@@ -73,7 +73,7 @@ public struct TimelineGenerator: Sendable {
         if let b = s.battery {
             if let old = onACPower, old != b.onACPower {
                 events.append(TimelineEvent(time: now, category: .battery, severity: .healthy,
-                                            title: b.onACPower ? "Connected to power" : "Switched to battery power",
+                                            title: b.onACPower ? TimelineEpisodes.connectedToPowerTitle : TimelineEpisodes.switchedToBatteryTitle,
                                             detail: "\(Int(b.percent.rounded()))%"))
             }
             onACPower = b.onACPower
@@ -92,7 +92,7 @@ public struct TimelineGenerator: Sendable {
             events.append(r.connectivity == .offline
                 ? TimelineEvent(time: now, category: .connectivity, severity: .critical, title: "Offline",
                                 detail: "No network route")
-                : TimelineEvent(time: now, category: .connectivity, severity: .healthy, title: "Back online",
+                : TimelineEvent(time: now, category: .connectivity, severity: .healthy, title: TimelineEpisodes.backOnlineTitle,
                                 detail: newInterface.map { "via \($0)" }))
         }
         connectivity = r.connectivity
@@ -162,7 +162,7 @@ public struct TimelineGenerator: Sendable {
         let recovered = level == .healthy
         d.reported = level
         return [TimelineEvent(time: now, category: category, severity: level,
-                              title: recovered ? "\(title) back to normal" : "\(title) → \(Self.name(level))",
+                              title: recovered ? "\(title)\(TimelineEpisodes.recoveredSuffix)" : "\(title) → \(Self.name(level))",
                               detail: detail)]
     }
 

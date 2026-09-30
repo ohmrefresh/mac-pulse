@@ -35,6 +35,11 @@ struct SettingsView: View {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
             Toggle("Show Dock icon", isOn: $settings.showDockIcon)
+            Picker("Temperature unit", selection: $settings.temperatureUnit) {
+                ForEach(TemperatureUnit.allCases) { Text($0.symbol).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
             Picker("Sampling interval", selection: $settings.samplingInterval) {
                 ForEach(AppSettings.samplingChoices, id: \.self) { Text("\(Int($0)) second\($0 == 1 ? "" : "s")").tag($0) }
             }
@@ -62,7 +67,10 @@ struct SettingsView: View {
     private var menuBarPreview: String {
         guard previewVisible else { return "" }
         guard !settings.menuBarItems.isEmpty else { return "Shows the Mac Pulse icon only." }
-        return "Shows: " + MenuBarFormatter.text(settings.menuBarItems, metrics.menuBarInputs)
+        let inputs = metrics.menuBarInputs
+        return "Shows: " + Format.menuBarSegments(MenuBarFormatter.segments(settings.menuBarItems, inputs),
+                                                  cpuCelsius: inputs.cpuCelsius, unit: settings.temperatureUnit)
+            .map(\.text).joined(separator: MenuBarFormatter.separator)
     }
 
     private var network: some View {
@@ -98,7 +106,14 @@ struct SettingsView: View {
                 LabeledContent("Slow gateway") { stepper($settings.gatewayLatencyMs, unit: "ms", step: 10, range: 10...2000) }
                 LabeledContent("Slow DNS") { stepper($settings.dnsSlowMs, unit: "ms", step: 10, range: 20...5000) }
                 LabeledContent("Low disk below") { stepper($settings.lowDiskGB, unit: "GB", step: 5, range: 1...500) }
-                LabeledContent("Hot CPU above") { stepper($settings.hotCPUCelsius, unit: "°C", step: 1, range: 60...110) }
+                LabeledContent("Hot CPU above") {
+                    // Stored in °C; shown and stepped in the user's unit.
+                    let unit = settings.temperatureUnit
+                    stepper(Binding(get: { unit.threshold(fromCelsius: settings.hotCPUCelsius) },
+                                    set: { settings.hotCPUCelsius = unit.storedCelsius(entered: $0) }),
+                            unit: unit.symbol, step: 1,
+                            range: unit.fromCelsius(60).rounded()...unit.fromCelsius(110).rounded())
+                }
                 Text("Internet latency and packet loss limits are on the Network tab.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -146,7 +161,10 @@ struct SettingsView: View {
     }
 
     private func stepper(_ value: Binding<Double>, unit: String, step: Double, range: ClosedRange<Double>) -> some View {
-        Stepper("\(Int(value.wrappedValue)) \(unit)", value: value, in: range, step: step).monospacedDigit()
+        // One decimal only when there is one (a half-degree °C kept from a °F entry); never truncated.
+        let v = value.wrappedValue
+        return Stepper("\(Format.decimal(v, places: v.rounded() == v ? 0 : 1)) \(unit)", value: value, in: range, step: step)
+            .monospacedDigit()
     }
 
     /// A warning stepper that cannot climb past its critical partner, and a critical stepper that
@@ -170,7 +188,7 @@ struct SettingsView: View {
         case .latency: "Internet latency"
         case .battery: "Battery"
         case .thermal: "Thermal state"
-        case .temperature: "CPU temperature (°C)"
+        case .temperature: "CPU temperature (\(settings.temperatureUnit.symbol))"
         case .gpu: "GPU usage"
         }
     }

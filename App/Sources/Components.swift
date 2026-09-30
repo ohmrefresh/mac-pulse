@@ -256,20 +256,24 @@ struct Sparkline: View {
     var domain: ClosedRange<Double>?
     var height: CGFloat = 50
     var lineWidth: CGFloat = 1.4
+    /// The gradient under the line. Off where the line sits mid-scale (a temperature, not a load),
+    /// since a fill down to an arbitrary floor would read as a quantity.
+    var filled = true
 
     init(values: [Double], tint: Color, points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50,
-         lineWidth: CGFloat = 1.4) {
+         lineWidth: CGFloat = 1.4, filled: Bool = true) {
         self.init(series: [Series(name: "value", values: values, tint: tint)], points: points, domain: domain,
-                  height: height, lineWidth: lineWidth)
+                  height: height, lineWidth: lineWidth, filled: filled)
     }
 
     init(series: [Series], points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50,
-         lineWidth: CGFloat = 1.4) {
+         lineWidth: CGFloat = 1.4, filled: Bool = true) {
         self.series = series
         self.points = points
         self.domain = domain
         self.height = height
         self.lineWidth = lineWidth
+        self.filled = filled
     }
 
     /// Top of a percentage sparkline's scale: the peak plus 25% headroom, in steps of 10, never
@@ -286,12 +290,14 @@ struct Sparkline: View {
                 let tail = Array(s.values.suffix(points))
                 let offset = points - tail.count
                 ForEach(Array(tail.enumerated()), id: \.offset) { index, value in
-                    if !value.isNaN {
+                    if !value.isNaN && filled {
                         AreaMark(x: .value("t", offset + index), yStart: .value("base", yDomain.lowerBound),
                                  yEnd: .value("v", value), series: .value("s", s.name))
                             .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.35), s.tint.opacity(0.02)],
                                                             startPoint: .top, endPoint: .bottom))
+                    }
+                    if !value.isNaN {
                         LineMark(x: .value("t", offset + index), y: .value("v", value), series: .value("s", s.name))
                             .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(s.tint)
@@ -754,6 +760,7 @@ struct ConcernBanner<Actions: View>: View {
     /// The Overview's larger variant.
     var prominent = false
     @ViewBuilder let actions: Actions
+    @Environment(\.temperatureUnit) private var unit
 
     private static var fill: Double { MetricCard<EmptyView>.emphasisFill }
 
@@ -770,11 +777,11 @@ struct ConcernBanner<Actions: View>: View {
                     .foregroundStyle(ink)
                 // The Overview keeps it to one sentence: figures, then what is still fine.
                 if prominent {
-                    let line = [metrics.concernFigures(concern.signal), Format.healthyLine(concern.healthy)]
+                    let line = [metrics.concernFigures(concern.signal, unit: unit), Format.healthyLine(concern.healthy)]
                         .compactMap { $0 }.joined(separator: " ")
                     if !line.isEmpty { Text(line).font(.callout).foregroundStyle(.secondary) }
                 } else {
-                    if let figures = metrics.concernFigures(concern.signal) { Text(figures).font(.caption) }
+                    if let figures = metrics.concernFigures(concern.signal, unit: unit) { Text(figures).font(.caption) }
                     if let healthy = Format.healthyLine(concern.healthy) {
                         Text(healthy).font(.caption).foregroundStyle(.secondary)
                     }
@@ -794,6 +801,78 @@ struct ConcernBanner<Actions: View>: View {
 extension ConcernBanner where Actions == EmptyView {
     init(concern: Concern, metrics: LiveMetrics) {
         self.init(concern: concern, metrics: metrics, actions: { EmptyView() })
+    }
+}
+
+/// A page-level notice in the Concern banner's wash — for states that are not a Concern but still
+/// need reading first, such as every alert rule being off. Optional trailing content (a legend, an
+/// action) sits at the right edge.
+struct NoticeBanner<Trailing: View>: View {
+    let level: HealthLevel
+    let symbol: String
+    let title: String
+    var detail: String?
+    @ViewBuilder var trailing: Trailing
+
+    static var fill: Double { MetricCard<EmptyView>.emphasisFill }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 3))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 4.5))
+                if let detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            trailing
+        }
+        .padding(14)
+        .background(level.tint.opacity(Self.fill), in: shape)
+        .overlay(shape.strokeBorder(level.tint.opacity(0.35), lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension NoticeBanner where Trailing == EmptyView {
+    init(level: HealthLevel, symbol: String, title: String, detail: String? = nil) {
+        self.init(level: level, symbol: symbol, title: title, detail: detail, trailing: { EmptyView() })
+    }
+}
+
+/// A label in a metric's tint on a wash of it — `HealthBadge`'s shape for facts that are not a Health
+/// Level (a port reachable from the network), so status colour stays reserved for Health Levels.
+struct TintBadge: View {
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        Text(label)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .foregroundStyle(tint.readableInk(on: .tintedFill(HealthBadge.fillOpacity), minimum: 4.5))
+            .background(tint.opacity(HealthBadge.fillOpacity), in: Capsule())
+    }
+}
+
+/// A small filled capsule: a count ("×4") or a tag beside a row's title.
+struct CountChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
     }
 }
 
@@ -1000,6 +1079,41 @@ struct KeyValue: View {
                 Text(key).foregroundStyle(.secondary)
                 Text(value).monospacedDigit()
             }
+        }
+    }
+}
+
+/// `MeterBar` at a fixed width, for table cells: no GeometryReader, so a list of hundreds of
+/// rows refreshing every second lays each bar out in one pass.
+struct CellMeter: View {
+    /// 0...1; clamped.
+    let fraction: Double
+    let tint: Color
+    var width: CGFloat = 56
+    var height: CGFloat = 4
+
+    var body: some View {
+        Capsule()
+            .fill(.quaternary)
+            .frame(width: width, height: height)
+            .overlay(alignment: .leading) {
+                Capsule().fill(tint)
+                    .frame(width: width * min(max(fraction.isNaN ? 0 : fraction, 0), 1), height: height)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// A tinted dot and a short label: where a port is reachable from, a container's state.
+struct DotLabel: View {
+    let text: String
+    let tint: Color
+    var ink: Color? = nil
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(text).foregroundStyle(ink ?? .primary).lineLimit(1)
         }
     }
 }
