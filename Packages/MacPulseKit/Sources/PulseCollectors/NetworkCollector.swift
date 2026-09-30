@@ -17,11 +17,19 @@ public struct InterfaceCounters: Sendable, Equatable {
 public struct NetworkReading: Sendable, Equatable {
     /// BSD name of the primary interface (e.g. "en0"), nil when there is no route.
     public var interface: String?
+    /// What the primary interface is, e.g. "Wi‑Fi" or "Ethernet". Nil for interfaces that are not
+    /// network hardware (VPN tunnels) or when SystemConfiguration does not know it.
+    public var interfaceKind: String?
     public var downBytesPerSec: Double
     public var upBytesPerSec: Double
+    /// First routable IPv4 address of the primary interface, e.g. "192.168.1.42".
+    public var localIPv4: String?
 
-    public init(interface: String?, downBytesPerSec: Double, upBytesPerSec: Double) {
+    public init(interface: String?, interfaceKind: String? = nil, downBytesPerSec: Double, upBytesPerSec: Double,
+                localIPv4: String? = nil) {
         self.interface = interface
+        self.interfaceKind = interfaceKind
+        self.localIPv4 = localIPv4
         self.downBytesPerSec = downBytesPerSec
         self.upBytesPerSec = upBytesPerSec
     }
@@ -48,7 +56,7 @@ public enum NetworkRate {
 /// tunnels (utun*) on top of the physical link carrying them.
 public struct NetworkCollector: Sendable {
     private var previous: (counters: InterfaceCounters, time: TimeInterval)?
-    private var primary: (name: String?, resolvedAt: TimeInterval)?
+    private var primary: (name: String?, kind: String?, ipv4: String?, resolvedAt: TimeInterval)?
     /// The primary interface rarely changes and each lookup opens a SystemConfiguration session.
     private static let primaryRefreshInterval: TimeInterval = 5
 
@@ -57,17 +65,36 @@ public struct NetworkCollector: Sendable {
     /// First call after start or an interface change primes the baseline and reports zero rates.
     public mutating func sample(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> NetworkReading {
         if primary == nil || now - primary!.resolvedAt >= Self.primaryRefreshInterval {
-            primary = (Self.primaryInterface(), now)
+            let name = Self.primaryInterface()
+            // The kind lookup enumerates every interface, so it runs only when the primary changes.
+            let kind = primary != nil && name == primary?.name ? primary?.kind : name.flatMap(Self.interfaceKind)
+            // The address is re-read on every refresh: a DHCP renewal can change it on the same interface.
+            let ipv4 = name.flatMap { NetworkConfigCollector.localIPv4(NetworkConfigCollector.ipv4Addresses()[$0] ?? []) }
+            primary = (name, kind, ipv4, now)
         }
         guard let name = primary?.name, let counters = Self.counters(only: name)[name] else {
             previous = nil
             return NetworkReading(interface: nil, downBytesPerSec: 0, upBytesPerSec: 0)
         }
         defer { previous = (counters, now) }
-        if let previous, let reading = NetworkRate.reading(from: previous.counters, at: previous.time, to: counters, at: now) {
-            return reading
-        }
-        return NetworkReading(interface: name, downBytesPerSec: 0, upBytesPerSec: 0)
+        var reading = previous.flatMap {
+            NetworkRate.reading(from: $0.counters, at: $0.time, to: counters, at: now)
+        } ?? NetworkReading(interface: name, downBytesPerSec: 0, upBytesPerSec: 0)
+        reading.interfaceKind = primary?.kind
+        reading.localIPv4 = primary?.ipv4
+        return reading
+    }
+
+    /// `interfaceKind` of a Wi‑Fi link. Spelled with a non-breaking hyphen (U+2011); compare against this.
+    public static let wifiKind = "Wi‑Fi"
+
+    /// "Wi‑Fi", or the system's own name for other hardware ("Ethernet", "Thunderbolt Bridge").
+    /// Needs no Location Services permission: it names the kind of link, never the network.
+    public static func interfaceKind(_ bsdName: String) -> String? {
+        guard let all = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface],
+              let match = all.first(where: { SCNetworkInterfaceGetBSDName($0) as String? == bsdName }) else { return nil }
+        if SCNetworkInterfaceGetInterfaceType(match) == kSCNetworkInterfaceTypeIEEE80211 { return wifiKind }
+        return SCNetworkInterfaceGetLocalizedDisplayName(match) as String?
     }
 
     public static func primaryInterface() -> String? {

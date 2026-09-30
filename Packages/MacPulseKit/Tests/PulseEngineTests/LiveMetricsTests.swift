@@ -53,6 +53,22 @@ import PulseCollectors
         #expect(m.perCoreHistory.count == 3)
     }
 
+    @Test func volumesFollowTheDiskJobAndKeepOnNilTicks() {
+        let m = LiveMetrics()
+        var s = Snapshot()
+        let root = DiskReading(volumeName: "Macintosh HD", totalBytes: 100, availableBytes: 40, mountPath: "/")
+        let usb = DiskReading(volumeName: "USB", totalBytes: 10, availableBytes: 5, mountPath: "/Volumes/USB",
+                              isRemovable: true)
+        s.volumes = [root, usb]
+        m.apply(s)
+        #expect(m.volumes == [root, usb])
+        m.apply(Snapshot())             // disk job not due: keep the last list
+        #expect(m.volumes == [root, usb])
+        s.volumes = [root]              // unmounted
+        m.apply(s)
+        #expect(m.volumes == [root])
+    }
+
     @Test func batteryAndTemperatureHistoriesAndCPUHealth() {
         let m = LiveMetrics()
         var s = Snapshot()
@@ -153,5 +169,148 @@ import PulseCollectors
         m.apply(DeveloperSnapshot(networkConfig: NetworkConfigReading(primaryInterface: "en0", vpnInterfaces: [], proxies: [])))
         m.apply(DeveloperSnapshot(networkConfig: NetworkConfigReading(primaryInterface: "en0", vpnInterfaces: ["utun6"], proxies: [])))
         #expect(m.recentEvents.last?.title == "VPN connected")
+    }
+
+    private func probe(_ ms: Double?) -> ProbeReading { ProbeReading(address: "x", latencyMs: ms, lossPercent: 0) }
+
+    /// Path series use NaN for a timed-out probe, but record nothing for a probe that does not exist
+    /// (no IPv4 router behind a VPN): a missing gateway must not read as 100 % loss.
+    @Test func pathSeriesRecordTimeoutsButNotAbsentProbes() {
+        let m = LiveMetrics()
+        m.apply(NetworkHealthReading(connectivity: .online, gateway: probe(3), internet: probe(20),
+                                     comparisons: [ProbeReading(address: "8.8.8.8", latencyMs: nil, lossPercent: 0, host: "8.8.8.8")],
+                                     dns: DNSReading(server: "1.1.1.1", latencyMs: 15), health: .healthy))
+        m.apply(NetworkHealthReading(connectivity: .online, gateway: nil, internet: probe(21),
+                                     dns: nil, health: .healthy))
+        #expect(m.gatewayLatencyHistory.values == [3])
+        let comparison = try! #require(m.comparisonLatencyHistories["8.8.8.8"])
+        #expect(comparison.values.count == 1 && comparison.values[0].isNaN)
+        #expect(m.dnsLatencyHistory.values == [15])
+        #expect(m.latencyHistory.values == [20, 21])
+    }
+
+    @Test func pathSeriesSkipOfflineReadings() {
+        let m = LiveMetrics()
+        m.apply(NetworkHealthReading(connectivity: .offline, gateway: probe(nil), internet: nil, health: .critical))
+        #expect(m.gatewayLatencyHistory.count == 0)
+    }
+
+    @Test func pathInsightUsesTheLiveSeries() {
+        let m = LiveMetrics()
+        #expect(m.pathInsight == nil)
+        for ms in [3.0, 4, 5] {
+            m.apply(NetworkHealthReading(connectivity: .online, gateway: probe(3), internet: probe(ms == 4 ? 400 : 20), health: .healthy))
+        }
+        #expect(m.pathInsight?.text.hasPrefix("Spikes appear only past the gateway") == true)
+    }
+
+    /// Wi‑Fi details are only meaningful while the Network page is up: reference-counted, cleared on the last close.
+    @Test func networkGateIsReferenceCountedAndClearsWiFi() {
+        let m = LiveMetrics()
+        var s = Snapshot()
+        s.wifi = WiFiReading(rssiDBm: -54, phy: "Wi‑Fi 6")
+        m.networkAppeared()
+        m.networkAppeared()
+        m.apply(s)
+        #expect(m.wifi?.rssiDBm == -54)
+        m.networkDisappeared()
+        #expect(m.wifi != nil)            // still one viewer
+        m.networkDisappeared()
+        #expect(m.wifi == nil)
+        m.networkDisappeared()            // unbalanced call must not underflow
+        m.networkAppeared()
+        m.apply(s)
+        #expect(m.wifi != nil)
+    }
+
+    @Test func wifiClearsWhenThePrimaryIsNotWiFi() {
+        let m = LiveMetrics()
+        m.networkAppeared()
+        var s = Snapshot()
+        s.wifi = WiFiReading(rssiDBm: -54, phy: nil)
+        m.apply(s)
+        var e = Snapshot()
+        e.network = NetworkReading(interface: "en5", interfaceKind: "Ethernet", downBytesPerSec: 0, upBytesPerSec: 0)
+        m.apply(e)
+        #expect(m.wifi == nil)
+    }
+
+    @Test func transferredAndPeakFollowTheThroughputSeries() {
+        let m = LiveMetrics(baseInterval: 1)
+        for (down, up) in [(100.0, 10.0), (300, 5), (200, 20)] {
+            var s = Snapshot()
+            s.cpu = CPUReading(totalPercent: 0, perCorePercent: [])
+            s.network = NetworkReading(interface: "en0", downBytesPerSec: down, upBytesPerSec: up)
+            m.apply(s)
+        }
+        #expect(m.transferredLast5Minutes.down == 600)
+        #expect(m.transferredLast5Minutes.up == 35)
+        let last = try! #require(m.lastSampleAt)
+        #expect(m.peakDown?.bytesPerSec == 300)
+        #expect(m.peakDown?.time == last.addingTimeInterval(-1))
+        #expect(m.peakUp?.bytesPerSec == 20)
+        #expect(m.peakUp?.time == last)
+    }
+
+    @Test func latencyThresholdFollowsConfigureNetwork() {
+        let m = LiveMetrics()
+        #expect(m.latencyThreshold == NetworkThresholds().latencyMs)
+        m.configureNetwork(targets: ProbeTargets.defaults,
+                           thresholds: NetworkThresholds(latencyMs: Threshold(warning: 50, critical: 150)))
+        #expect(m.latencyThreshold == Threshold(warning: 50, critical: 150))
+    }
+
+    private func comparison(_ host: String, _ ms: Double?, unresolved: Bool = false) -> ProbeReading {
+        ProbeReading(address: host, latencyMs: ms, lossPercent: nil, host: host, unresolved: unresolved)
+    }
+
+    /// Can't-resolve is not a timeout: it appends nothing, so it never reads as loss.
+    @Test func unresolvedTargetsAppendNothing() {
+        let m = LiveMetrics()
+        m.apply(NetworkHealthReading(connectivity: .online, gateway: nil,
+                                     internet: comparison("x.invalid", nil, unresolved: true),
+                                     comparisons: [comparison("y.invalid", nil, unresolved: true)], health: .warning))
+        #expect(m.latencyHistory.count == 0)
+        #expect(m.comparisonLatencyHistories["y.invalid"] == nil)
+    }
+
+    @Test func configureNetworkPrunesRemovedComparisonSeriesAndSanitizes() {
+        let m = LiveMetrics()
+        m.configureNetwork(targets: [ProbeTarget("1.1.1.1"), ProbeTarget("8.8.8.8"), ProbeTarget("9.9.9.9")], thresholds: NetworkThresholds())
+        m.apply(NetworkHealthReading(connectivity: .online, gateway: nil, internet: probe(20),
+                                     comparisons: [comparison("8.8.8.8", 20), comparison("9.9.9.9", 30)], health: .healthy))
+        #expect(Set(m.comparisonLatencyHistories.keys) == ["8.8.8.8", "9.9.9.9"])
+        m.configureNetwork(targets: [ProbeTarget("1.1.1.1"), ProbeTarget("9.9.9.9"), ProbeTarget("bad target")], thresholds: NetworkThresholds())
+        #expect(Set(m.comparisonLatencyHistories.keys) == ["9.9.9.9"])
+        #expect(m.probeTargets.map(\.address) == ["1.1.1.1", "9.9.9.9"])
+    }
+
+    @Test func targetListEditsPostATimelineEventButTheFirstConfigureDoesNot() {
+        let m = LiveMetrics()
+        m.configureNetwork(targets: ProbeTargets.defaults, thresholds: NetworkThresholds())
+        m.configureNetwork(targets: ProbeTargets.defaults, thresholds: NetworkThresholds())
+        #expect(!m.recentEvents.contains { $0.title == "Internet targets changed" })
+        m.configureNetwork(targets: [ProbeTarget("9.9.9.9")], thresholds: NetworkThresholds())
+        #expect(m.recentEvents.last?.title == "Internet targets changed")
+        #expect(m.recentEvents.last?.detail == "9.9.9.9")
+    }
+
+    @Test func pathInsightNamesTheOneSlowComparison() {
+        let m = LiveMetrics()
+        m.configureNetwork(targets: [ProbeTarget("1.1.1.1"), ProbeTarget("github.com", label: "GitHub")], thresholds: NetworkThresholds())
+        var gh = comparison("140.82.112.4", 400)
+        gh.host = "github.com"; gh.label = "GitHub"
+        m.apply(NetworkHealthReading(connectivity: .online, gateway: probe(3), internet: probe(20), comparisons: [gh], health: .healthy))
+        #expect(m.pathInsight?.text == "Only GitHub is slow — possibly that server or its network.")
+    }
+
+    /// A latency alert must not fire because a name stopped resolving: there is no latency to compare.
+    @Test func unresolvedPrimaryDoesNotFireALatencyAlert() {
+        let m = LiveMetrics()
+        m.setAlertRules([AlertRule(name: "Slow", metric: .latencyMs, comparator: .above, threshold: 100,
+                                   duration: 0, severity: .warning, isEnabled: true)])
+        m.apply(NetworkHealthReading(connectivity: .online, gateway: nil,
+                                     internet: comparison("x.invalid", nil, unresolved: true), health: .warning))
+        #expect(m.firingAlertIDs.isEmpty)
     }
 }

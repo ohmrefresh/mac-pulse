@@ -35,6 +35,31 @@ import PulseStore
     }
 }
 
+@Suite struct DiagnosticsTargetBurstTests {
+    /// Every target gets a burst on its own sequence range, named as the user knows it; one that does
+    /// not resolve has nothing to ping and is left out rather than reported as 100 % loss.
+    @Test func burstsEveryResolvableTarget() async {
+        let targets = [ProbeTarget("1.1.1.1"), ProbeTarget("github.com", label: "GitHub"), ProbeTarget("x.invalid")]
+        let calls = Calls()
+        let probes = await DiagnosticsRunner.internetBursts(
+            targets,
+            resolve: { $0 == "github.com" ? ["140.82.112.4"] : $0 == "1.1.1.1" ? ["1.1.1.1"] : [] },
+            burst: { address, base in
+                await calls.add(address, base)
+                return DiagnosticInput.Probe(address: address, avgMs: 10, lossPercent: 0)
+            })
+        #expect(probes.map(\.address) == ["1.1.1.1", "GitHub"])
+        let recorded = await calls.all
+        #expect(Set(recorded.map(\.address)) == ["1.1.1.1", "140.82.112.4"])
+        #expect(Set(recorded.map(\.base)).count == 2)
+    }
+
+    actor Calls {
+        var all: [(address: String, base: UInt16)] = []
+        func add(_ a: String, _ b: UInt16) { all.append((a, b)) }
+    }
+}
+
 /// Needs network: `PULSE_NET=1 swift test --filter LiveDiagnosticsTests`
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["PULSE_NET"] != nil))
 struct LiveDiagnosticsTests {
@@ -43,7 +68,7 @@ struct LiveDiagnosticsTests {
         var report: DiagnosticReport?
         let elapsed = await clock.measure {
             report = await DiagnosticsRunner.run(history: nil, live: .init(memoryUsedPercent: 60, diskFreeBytes: 300e9,
-                                                                          primaryTarget: "1.1.1.1", cpuFallback: [10, 20]))
+                                                                          targets: ProbeTargets.defaults, cpuFallback: [10, 20]))
         }
         print("DIAG took \(elapsed); findings: \(report?.findings.map(\.title) ?? [])")
         #expect(elapsed < .seconds(15))

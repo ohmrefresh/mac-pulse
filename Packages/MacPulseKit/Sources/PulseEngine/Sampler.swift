@@ -9,6 +9,8 @@ public struct Snapshot: Sendable {
     public var memory: MemoryReading?
     public var network: NetworkReading?
     public var disk: DiskReading?
+    /// Every mounted Volume, startup disk first; sampled with `disk`.
+    public var volumes: [DiskReading]?
     public var battery: BatteryReading?
     public var thermal: ThermalState?
     public var processes: [ProcessRow]?
@@ -17,6 +19,7 @@ public struct Snapshot: Sendable {
     public var loadAverage: LoadAverage?
     public var frequency: FrequencyReading?
     public var peripheralBatteries: [PeripheralBattery]?
+    public var wifi: WiFiReading?
 }
 
 /// The single clock driving every collector, off the main thread.
@@ -32,6 +35,9 @@ actor Sampler {
     private let sensors = SensorsCollector()
     /// Created on demand while the Performance page is visible, released when it goes away (ADR 0003).
     private var ioReport: IOReportClient?
+    /// Network page on screen: the only time Wi‑Fi details are read.
+    private var networkVisible = false
+    private var lastNetwork: NetworkReading?
     private var loop: Task<Void, Never>?
     private let recorder: HistoryRecorder?
 
@@ -75,6 +81,11 @@ actor Sampler {
         ioReport = visible ? IOReportClient() : nil
     }
 
+    func setNetworkVisible(_ visible: Bool) {
+        networkVisible = visible
+        if visible { cadence.expedite(.wifi) }   // don't wait up to 5 s for the first reading
+    }
+
     func setSensorsInMenuBar(_ value: Bool) {
         cadence.sensorsInMenuBar = value
     }
@@ -105,6 +116,7 @@ actor Sampler {
             s.cpu = cpu.sample()
             s.memory = memory.sample()
             s.network = network.sample(now: now)
+            lastNetwork = s.network
             s.loadAverage = SystemInfoCollector.loadAverage()
         }
         if due.contains(.power) {
@@ -117,10 +129,16 @@ actor Sampler {
         }
         if due.contains(.disk) {
             s.disk = disk.sample()
+            s.volumes = DiskCollector.sampleVolumes(startup: s.disk)
             s.peripheralBatteries = PeripheralBatteryCollector.sample()
         }
         if due.contains(.sensors) {
             s.sensors = sensors.sample()
+        }
+        if due.contains(.wifi), networkVisible, lastNetwork?.interfaceKind == NetworkCollector.wifiKind,
+           let name = lastNetwork?.interface {
+            // An empty reading, not nil, when CoreWLAN has nothing: nil would keep the previous values.
+            s.wifi = WiFiCollector.sample(interface: name) ?? WiFiReading(rssiDBm: nil, phy: nil)
         }
         if due.contains(.processes) {
             s.processes = processes.sample(refreshPrivileged: due.contains(.privilegedProcesses), now: now)

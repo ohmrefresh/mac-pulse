@@ -19,6 +19,12 @@ _Avoid_: network status
 **Health Mapping**:
 The fixed translation from a source scale to Health Level — thermal Nominal/Fair→Healthy, Serious→Warning, Critical→Critical; memory pressure Normal/Warning/Critical one-to-one; Battery Condition Normal→Healthy, Service Recommended→Warning.
 
+**Concern**:
+The single worst non-Healthy signal at a given moment — CPU, memory pressure, internet, Battery Condition or
+Thermal State — shown as the lead on the Menu Bar, the Popover and the Overview. Absent when everything is Healthy; a tie
+goes to the signal read first in that order.
+_Avoid_: alert (an Alert is a Firing Alert Rule), status banner
+
 **Battery Condition**:
 macOS's own verdict on battery wear: Normal or Service Recommended. Independent of charge level.
 _Avoid_: battery health (for charge level)
@@ -56,8 +62,27 @@ The component that reads one metric family from the OS.
 **Probe**:
 An active network test (ICMP ping or DNS lookup) against a target, as opposed to passive reading.
 
+**Path**:
+The chain of Probes from the Mac outward — gateway, DNS resolver, then each internet target — read side by side to place where latency or loss comes from (LAN vs upstream).
+_Avoid_: route, traceroute (no hop-by-hop tracing is done)
+
+**Primary Target**:
+The first internet target in the user's list. Its latency and loss drive the network Health Level, alerts and the Menu Bar.
+_Avoid_: ping host, main target
+
+**Comparison Target**:
+Any other internet target in the user's list. Shown along the Path and used by Diagnostics to tell a target-specific problem from a general upstream one; never affects Health Level.
+_Avoid_: secondary, backup
+
+**Recent Activity**:
+The latest few Timeline Events, newest first, shown on the Overview. Every kind of event, not only Alerts.
+_Avoid_: recent alerts
+
 **Top Processes**:
 The top 10 processes by CPU and top 10 by memory at a process scan. The only processes kept in history.
+
+**Volume**:
+A mounted disk the Mac can report capacity for — the startup disk plus any external or network volumes. Shown live only; only the startup disk's free space is kept in history.
 
 **Primary Interface**:
 The network interface carrying the default route (e.g. en0). Throughput is measured on it alone.
@@ -135,6 +160,11 @@ Inactive → Pending → Firing → Resolved. Firing needs the condition held fo
 **Timeline Event**:
 A recorded moment something changed: a Health Level transition, alert firing/resolving, connectivity change, notable process change, or system event (sleep/wake, power source, thermal).
 _Avoid_: log entry, activity
+Battery events (power source changes) are shown to users under the category name **Power**.
+
+**Episode**:
+One signal's stretch away from Healthy: from its first non-Healthy Timeline Event to the Healthy one that ends it. Ongoing until then.
+_Avoid_: incident, outage
 
 **Template**:
 A predefined Alert Rule offered once; editing or deleting it is permanent, and only templates the user has never seen are added later.

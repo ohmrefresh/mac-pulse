@@ -27,24 +27,45 @@ enum ChartRange: TimeInterval, CaseIterable, Identifiable {
     /// because temperature is not kept that long.
     static let stored: [ChartRange] = [.hour, .sixHours, .day, .week, .month]
     static let sensors: [ChartRange] = [.hour, .sixHours, .day, .week]
+
+    /// "Last 24 hours" — the span a stored-history page covers, in words.
+    var spanName: String {
+        switch self {
+        case .live: "Live"
+        case .hour: "Last hour"
+        case .sixHours: "Last 6 hours"
+        case .day: "Last 24 hours"
+        case .week: "Last 7 days"
+        case .month: "Last 30 days"
+        }
+    }
 }
 
 struct ChartRangePicker: View {
     @Binding var range: ChartRange
     var options: [ChartRange] = ChartRange.allCases
+    /// When set, the live option is labelled by the span it covers ("5m") instead of "Live".
+    var liveWindow: TimeInterval?
     var body: some View {
         Picker("Range", selection: $range) {
-            ForEach(options) { Text($0.label).tag($0) }
+            ForEach(options) { option in
+                Text(option == .live ? liveWindow.map(Self.span) ?? option.label : option.label).tag(option)
+            }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
         .fixedSize()
     }
+
+    /// "5m", "10m", or seconds below a minute.
+    private static func span(_ seconds: TimeInterval) -> String {
+        seconds >= 60 ? "\(Int((seconds / 60).rounded()))m" : "\(Int(seconds))s"
+    }
 }
 
 /// Stored history as avg lines with a min–max band; gaps where no data was recorded.
 struct HistoryChart: View {
-    struct Line: Hashable {
+    struct Line {
         let kind: MetricKind
         let name: String
         var tint: Color = .accentColor
@@ -59,8 +80,17 @@ struct HistoryChart: View {
     var showsHoverDetails = false
     /// What the chart is of, for VoiceOver. The latest stored value per line is announced with it.
     var accessibilityTitle: String?
+    /// Draws the second line (and its band) negated below a 0 baseline on a symmetric axis.
+    var mirrored = false
+    /// Applied to plotted values; hover details, labels and VoiceOver keep the real values.
+    var scale: ChartScale = .linear
+    /// Off when the page draws its own legend (e.g. with current values).
+    var showsLegend = true
+    /// Gridline positions in plotted values; nil lets Charts choose (temperatures pass round values
+    /// in the display unit, from `TemperatureUnit.axisTicks`).
+    var yTicks: [Double]?
 
-    @State private var loaded: [Line: HistorySeries] = [:]
+    @State private var loaded: [MetricKind: HistorySeries] = [:]
     @State private var error: String?
     @State private var hoverDate: Date?
 
@@ -88,19 +118,23 @@ struct HistoryChart: View {
 
     private var chart: some View {
         Chart {
-            ForEach(lines, id: \.self) { line in
-                let series = loaded[line] ?? HistorySeries(points: [], stepSeconds: 1)
+            ForEach(lines, id: \.kind) { line in
+                let series = loaded[line.kind] ?? HistorySeries(points: [], stepSeconds: 1)
+                let sign: Double = mirrored && lines.count > 1 && line.kind == lines[1].kind ? -1 : 1
                 ForEach(Array(series.segments.enumerated()), id: \.offset) { index, segment in
                     ForEach(segment, id: \.time) { point in
                         if series.stepSeconds > 1 {
                             AreaMark(x: .value("Time", point.time),
-                                     yStart: .value("Min", point.min), yEnd: .value("Max", point.max),
+                                     yStart: .value("Min", scale.plot(sign * point.min)),
+                                     yEnd: .value("Max", scale.plot(sign * point.max)),
                                      series: .value("Band", "\(line.name)-band-\(index)"))
+                                .interpolationMethod(ChartCurve.line)
                                 .foregroundStyle(by: .value("Series", line.name))
                                 .opacity(0.18)
                         }
-                        LineMark(x: .value("Time", point.time), y: .value(line.name, point.avg),
+                        LineMark(x: .value("Time", point.time), y: .value(line.name, scale.plot(sign * point.avg)),
                                  series: .value("Segment", "\(line.name)-\(index)"))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(by: .value("Series", line.name))
                             .lineStyle(StrokeStyle(lineWidth: 1.4))
                     }
@@ -134,14 +168,26 @@ struct HistoryChart: View {
         }
         .chartForegroundStyleScale(domain: lines.map(\.name), range: lines.map(\.tint))
         .chartXScale(domain: Date().addingTimeInterval(-range.rawValue)...Date())
-        .chartYScale(domain: 0...yTop)
+        .chartYScale(domain: (mirrored ? -yTop : 0)...yTop)
         .chartYAxis {
-            AxisMarks { value in
-                AxisGridLine()
-                AxisValueLabel { if let v = value.as(Double.self) { Text(format(v)) } }
+            if scale == .signedLog {
+                AxisMarks(values: scale.ticks(maxMagnitude: scale.value(yTop), mirrored: mirrored)) { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
+                }
+            } else if let yTicks {
+                AxisMarks(values: yTicks) { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
+                }
+            } else {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
+                }
             }
         }
-        .chartLegend(lines.count > 1 ? .visible : .hidden)
+        .chartLegend(showsLegend && lines.count > 1 ? .visible : .hidden)
         // One element for the whole chart; see TimeSeriesChart for why.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? lines.map(\.name).joined(separator: ", "))
@@ -151,7 +197,7 @@ struct HistoryChart: View {
     /// "CPU 12%, last 1 h" — the newest stored value per line over the selected range.
     private var summary: String {
         let latest = lines.compactMap { line -> String? in
-            guard let point = loaded[line]?.points.last else { return nil }
+            guard let point = loaded[line.kind]?.points.last else { return nil }
             return "\(line.name) \(format(point.avg))"
         }
         guard !latest.isEmpty else { return "No data recorded in this range" }
@@ -163,8 +209,8 @@ struct HistoryChart: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(date, format: range.rawValue > 86_400 ? .dateTime.weekday().hour().minute() : .dateTime.hour().minute())
                 .font(.caption.weight(.semibold))
-            ForEach(lines, id: \.self) { line in
-                if let series = loaded[line],
+            ForEach(lines, id: \.kind) { line in
+                if let series = loaded[line.kind],
                    let point = series.points.min(by: { abs($0.time.timeIntervalSince(date)) < abs($1.time.timeIntervalSince(date)) }),
                    abs(point.time.timeIntervalSince(date)) <= max(Double(series.stepSeconds) * 2, 90) {
                     HStack(spacing: 6) {
@@ -185,10 +231,16 @@ struct HistoryChart: View {
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
 
+    /// Plotted top of the y-axis; a mirrored chart spans the same distance below 0.
     private var yTop: Double {
-        if let maximum { return maximum }
+        if let maximum { return scale.plot(maximum) }
         let peak = loaded.values.flatMap { $0.points.map(\.max) }.max() ?? 1
-        return max(peak * 1.1, 1)
+        return scale == .linear ? max(peak * 1.1, 1) : scale.top(maxMagnitude: peak)
+    }
+
+    /// Labels read as magnitudes: the mirrored line's "-10 MB/s" is still 10 MB/s.
+    private func axisLabel(_ plotted: Double) -> String {
+        format(abs(scale.value(plotted)))
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -205,13 +257,19 @@ struct HistoryChart: View {
         let from = Date().addingTimeInterval(-range.rawValue), to = Date(), lines = self.lines
         do {
             loaded = try await Task.detached {
-                var result: [Line: HistorySeries] = [:]
-                for line in lines { result[line] = try history.chartSeries(line.kind, from: from, to: to) }
-                return result
+                try Self.loadSeries(history: history, lines: lines, from: from, to: to)
             }.value
             error = nil
         } catch {
             self.error = "Could not read history: \(error.localizedDescription)"
         }
+    }
+
+    /// Keyed by metric, not `Line`: a `Line.tint` from `MetricStyle.shade` is a new dynamic
+    /// color on every render and never equal, so a `Line` key misses after the next re-render.
+    nonisolated static func loadSeries(history: HistoryStore, lines: [Line], from: Date, to: Date) throws -> [MetricKind: HistorySeries] {
+        var result: [MetricKind: HistorySeries] = [:]
+        for line in lines { result[line.kind] = try history.chartSeries(line.kind, from: from, to: to) }
+        return result
     }
 }

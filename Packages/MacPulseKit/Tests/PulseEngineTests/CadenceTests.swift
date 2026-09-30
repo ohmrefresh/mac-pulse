@@ -76,4 +76,11 @@ import Testing
         #expect(cadence.due(at: 2).contains(.disk))
         #expect(!cadence.due(at: 3).contains(.disk))                      // back to its 60 s cadence
     }
+
+    /// Wi‑Fi details tick every 5 s; the Sampler reads them only while the Network page is visible.
+    @Test func wifiRunsEveryFiveSeconds() {
+        var cadence = Cadence(baseInterval: 1)
+        let n = (0...60).reduce(0) { $0 + (cadence.due(at: Double($1)).contains(.wifi) ? 1 : 0) }
+        #expect(n == 13)
+    }
 }

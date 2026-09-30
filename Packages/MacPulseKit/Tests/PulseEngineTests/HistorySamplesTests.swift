@@ -38,7 +38,8 @@ import PulseCollectors
         let online = NetworkHealthReading.make(connectivity: .online,
                                                gateway: ProbeReading(address: "10.0.0.1", latencyMs: nil, lossPercent: 50),
                                                internet: ProbeReading(address: "1.1.1.1", latencyMs: 18, lossPercent: 0),
-                                               secondary: ProbeReading(address: "8.8.8.8", latencyMs: 20, lossPercent: 0),
+                                               comparisons: [ProbeReading(address: "8.8.8.8", latencyMs: 20, lossPercent: 0),
+                                                             ProbeReading(address: "9.9.9.9", latencyMs: 30, lossPercent: 0)],
                                                dns: DNSReading(server: "10.0.0.1", latencyMs: 420),
                                                thresholds: th)
         let values = Dictionary(uniqueKeysWithValues: HistorySamples.from(online, at: t).map { ($0.kind, $0.value) })
@@ -59,10 +60,3 @@ import PulseCollectors
     }
 }
 
-@Suite struct ProberTargetTests {
-    @Test func secondaryTargetDiffersFromPrimary() {
-        #expect(Prober.secondaryTarget(for: "1.1.1.1") == "8.8.8.8")
-        #expect(Prober.secondaryTarget(for: "8.8.8.8") == "1.1.1.1")
-        #expect(Prober.secondaryTarget(for: "9.9.9.9") == "8.8.8.8")
-    }
-}

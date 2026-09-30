@@ -11,7 +11,8 @@ enum DiagnosticsRunner {
     struct Live: Sendable {
         var memoryUsedPercent: Double?
         var diskFreeBytes: Double?
-        var primaryTarget: String
+        /// The user's internet targets, Primary first.
+        var targets: [ProbeTarget]
         var cpuFallback: [Double]      // used only when history is unavailable
     }
 
@@ -38,17 +39,37 @@ enum DiagnosticsRunner {
         }
         input.connectivity = .online
         let gateway = NetworkCollector.gatewayAddress()
-        let secondary = Prober.secondaryTarget(for: live.primaryTarget)
         let resolver = DNSProbe.systemResolver()
         async let g: DiagnosticInput.Probe? = gateway == nil ? nil : burst(gateway!, base: 1_000)
-        async let p = burst(live.primaryTarget, base: 2_000)
-        async let s = burst(secondary, base: 3_000)
+        async let i = internetBursts(live.targets, resolve: { await HostResolver.resolve($0) }, burst: { await burst($0, base: $1) })
         async let d: Double? = resolver == nil ? nil : DNSProbe.query(server: resolver!)
-        let (gw, primary, second, dnsMs) = await (g, p, s, d)
+        let (gw, internet, dnsMs) = await (g, i, d)
         input.gateway = gw
-        input.internet = [primary, second]
+        input.internet = internet
         input.dns = resolver.map { ($0, dnsMs) }
         return DiagnosticRules.evaluate(input, config: config)
+    }
+
+    /// One burst per target, in parallel and in list order, each on its own sequence range. Probes are
+    /// named as the user knows the target. A target that does not resolve is left out: it has nothing to
+    /// ping, and reporting it as 100 % loss would blame the network.
+    static func internetBursts(_ targets: [ProbeTarget],
+                               resolve: @escaping @Sendable (String) async -> [String],
+                               burst: @escaping @Sendable (String, UInt16) async -> DiagnosticInput.Probe) async -> [DiagnosticInput.Probe] {
+        await withTaskGroup(of: (Int, DiagnosticInput.Probe?).self) { group in
+            for (index, target) in targets.enumerated() {
+                group.addTask {
+                    // A dual-stack name bursts over IPv4: a burst cannot fall back mid-way if IPv6 has no route.
+                    guard let address = Prober.attemptOrder(await resolve(target.address)).last else { return (index, nil) }
+                    var probe = await burst(address, 2_000 &+ UInt16(index) &* 1_000)
+                    probe.address = target.displayName
+                    return (index, probe)
+                }
+            }
+            var out = [DiagnosticInput.Probe?](repeating: nil, count: targets.count)
+            for await (index, probe) in group { out[index] = probe }
+            return out.compactMap { $0 }
+        }
     }
 
     /// `burstCount` pings 100 ms apart: average of replies, loss over all.

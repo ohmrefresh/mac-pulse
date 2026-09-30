@@ -1,6 +1,8 @@
 import SwiftUI
 import Charts
 import PulseCore
+import PulseCollectors
+import PulseEngine
 
 /// One accent color and symbol per metric family, shared by the popover, cards, charts and sidebar
 /// so a metric looks the same everywhere (mockup palette; adapts to Light/Dark via system colors).
@@ -121,12 +123,11 @@ enum OKLCH {
                 gamma(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
     }
 
-    /// The card surface each appearance draws (`cardBackground`'s `.background.secondary`). Ink is
-    /// measured against the card rather than the window because the card is the worse case in both
-    /// appearances: darker than the window in Light, lighter than it in Dark.
+    /// The card surface each appearance draws (`Palette.card`). Ink is measured against the card
+    /// rather than the window because the card is where status text sits.
     enum Surface {
-        static let light = (0.961, 0.961, 0.961)
-        static let dark = (0.157, 0.157, 0.165)
+        static let light = (1.0, 1.0, 1.0)
+        static let dark = (0.133, 0.133, 0.149)
     }
 
     /// `alpha` of `color` over `surface` — what a tinted capsule fill actually measures. Ink drawn
@@ -205,6 +206,38 @@ extension Color {
     }
 }
 
+// MARK: - Palette
+
+/// The dashboard's surfaces, after `docs/prd/Redesign_v1.html`. The design is dark-only; the Dark
+/// values are its hex codes, and Light mirrors them (grey window, white cards) so both appearances
+/// keep the same layering: window, then sidebar, then card on top.
+enum Palette {
+    /// Detail pane and toolbar. Design `#1a1a1d`.
+    static let window = dynamic(light: 0xF5F5F7, dark: 0x1A1A1D)
+    /// Sidebar column. Design `#1f1f23`.
+    static let sidebar = dynamic(light: 0xECECEF, dark: 0x1F1F23)
+    /// Cards and tiles. Design `#222226`; `OKLCH.Surface` holds the same values for contrast checks.
+    static let card = dynamic(light: 0xFFFFFF, dark: 0x222226)
+    /// Card outline. Design `#2c2c32`.
+    static let cardBorder = dynamic(light: 0xE2E2E6, dark: 0x2C2C32)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let hex = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            return NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                           blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+        })
+    }
+}
+
+// MARK: - Curve
+
+/// The curve every line chart draws: through each sample, never past it. Monotone, so a line
+/// cannot dip below zero or show a peak that was not measured.
+enum ChartCurve {
+    static let line: InterpolationMethod = .monotone
+}
+
 // MARK: - Sparkline
 
 /// Shape-only trend line with a gradient fill. Plots the last `points` values; fewer values sit at the right edge.
@@ -222,16 +255,33 @@ struct Sparkline: View {
     /// Fixed y range (e.g. 0...100 for percentages); nil fits the data.
     var domain: ClosedRange<Double>?
     var height: CGFloat = 50
+    var lineWidth: CGFloat = 1.4
+    /// The gradient under the line. Off where the line sits mid-scale (a temperature, not a load),
+    /// since a fill down to an arbitrary floor would read as a quantity.
+    var filled = true
 
-    init(values: [Double], tint: Color, points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50) {
-        self.init(series: [Series(name: "value", values: values, tint: tint)], points: points, domain: domain, height: height)
+    init(values: [Double], tint: Color, points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50,
+         lineWidth: CGFloat = 1.4, filled: Bool = true) {
+        self.init(series: [Series(name: "value", values: values, tint: tint)], points: points, domain: domain,
+                  height: height, lineWidth: lineWidth, filled: filled)
     }
 
-    init(series: [Series], points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50) {
+    init(series: [Series], points: Int = 60, domain: ClosedRange<Double>? = nil, height: CGFloat = 50,
+         lineWidth: CGFloat = 1.4, filled: Bool = true) {
         self.series = series
         self.points = points
         self.domain = domain
         self.height = height
+        self.lineWidth = lineWidth
+        self.filled = filled
+    }
+
+    /// Top of a percentage sparkline's scale: the peak plus 25% headroom, in steps of 10, never
+    /// below 30 (so a 3% load does not fill the chart and read like a busy Mac) or above 100.
+    /// Stepping means the scale only moves when the peak crosses a step, not on every tick.
+    static func percentTop(_ values: [Double]) -> Double {
+        let peak = values.filter { $0.isFinite }.max() ?? 0
+        return min(100, max(30, (peak * 1.25 / 10).rounded(.up) * 10))
     }
 
     var body: some View {
@@ -240,14 +290,18 @@ struct Sparkline: View {
                 let tail = Array(s.values.suffix(points))
                 let offset = points - tail.count
                 ForEach(Array(tail.enumerated()), id: \.offset) { index, value in
-                    if !value.isNaN {
+                    if !value.isNaN && filled {
                         AreaMark(x: .value("t", offset + index), yStart: .value("base", yDomain.lowerBound),
                                  yEnd: .value("v", value), series: .value("s", s.name))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(LinearGradient(colors: [s.tint.opacity(0.35), s.tint.opacity(0.02)],
                                                             startPoint: .top, endPoint: .bottom))
+                    }
+                    if !value.isNaN {
                         LineMark(x: .value("t", offset + index), y: .value("v", value), series: .value("s", s.name))
+                            .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(s.tint)
-                            .lineStyle(StrokeStyle(lineWidth: 1.4))
+                            .lineStyle(StrokeStyle(lineWidth: lineWidth))
                     }
                 }
             }
@@ -270,14 +324,175 @@ struct Sparkline: View {
     }
 }
 
+// MARK: - Meter
+
+/// A share of a whole as a filled capsule: memory in use, battery charge, a process's slice.
+struct MeterBar: View {
+    /// 0...1; values outside are clamped, so a process above one core saturates the bar.
+    let fraction: Double
+    let tint: Color
+    var height: CGFloat = 6
+
+    var body: some View {
+        Capsule()
+            .fill(.quaternary)
+            .frame(height: height)
+            .overlay(alignment: .leading) {
+                GeometryReader { geometry in
+                    Capsule().fill(tint)
+                        .frame(width: geometry.size.width * min(max(fraction.isNaN ? 0 : fraction, 0), 1))
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// Parts of one whole side by side in one capsule: memory's App, Wired and Compressed. The rest of
+/// the track is what the parts leave. Silent to VoiceOver — the figures sit beside it as text.
+struct StackedMeter: View {
+    struct Segment {
+        let fraction: Double
+        let tint: Color
+    }
+
+    let segments: [Segment]
+    var height: CGFloat = 10
+
+    var body: some View {
+        GeometryReader { geometry in
+            let gap: CGFloat = 2
+            let usable = max(geometry.size.width - gap * CGFloat(max(segments.count - 1, 0)), 0)
+            HStack(spacing: gap) {
+                ForEach(segments.indices, id: \.self) { index in
+                    let fraction = segments[index].fraction
+                    Rectangle().fill(segments[index].tint)
+                        .frame(width: usable * min(max(fraction.isNaN ? 0 : fraction, 0), 1))
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: height)
+        .background(.quaternary)
+        .clipShape(Capsule())
+        .accessibilityHidden(true)
+    }
+}
+
+/// Rounded usage bar with a gradient fill (storage volumes, per-core rows).
+struct UsageBar: View {
+    let fraction: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.quaternary)
+                Capsule().fill(LinearGradient(colors: [tint.opacity(0.8), tint], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: geo.size.width * min(max(fraction, 0), 1))
+            }
+        }
+        .frame(height: 10)
+        .accessibilityElement()
+        .accessibilityLabel("Used")
+        .accessibilityValue(Format.percent(fraction * 100))
+    }
+}
+
+/// A headline figure: the number carries the weight, its unit sits small beside it.
+struct FigureText: View {
+    let number: String
+    let unit: String?
+    var size: Font = .title2
+    var unitSize: Font = .caption
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(number).font(size.weight(.semibold))
+            if let unit { Text(unit).font(unitSize).foregroundStyle(.secondary) }
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .fixedSize()
+    }
+}
+
+/// One row per logical core, one column per recent sample, shaded by load: many cores read at a
+/// glance where as many lines tangle. Rows are numbered, not labelled P/E — which core belongs to
+/// which cluster is not reported. Silent to VoiceOver; the rail beside it carries the figures.
+struct CoreHeatmap: View {
+    /// Per core, oldest first, 0...100.
+    let cores: [[Double]]
+    let tint: Color
+    var columns = 60
+    var rowHeight: CGFloat = 7
+
+    var body: some View {
+        Canvas { context, size in
+            guard !cores.isEmpty, columns > 0 else { return }
+            let pitch = size.width / CGFloat(columns)
+            // Cells read as cells only when they are wide enough; a full live window is a strip.
+            let gap: CGFloat = pitch >= 5 ? 1 : 0
+            for (row, values) in cores.enumerated() {
+                let y = CGFloat(row) * (rowHeight + 1)
+                let tail = values.suffix(columns)
+                let offset = columns - tail.count
+                // One fill for the row's idle shade, then only the samples that carry load: at rest
+                // most cores are idle, and a fill per cell per second is the page's main drawing cost.
+                let start = CGFloat(offset) * pitch
+                context.fill(Path(CGRect(x: start, y: y, width: size.width - start, height: rowHeight)),
+                             with: .color(tint.opacity(0.08)))
+                for (index, value) in tail.enumerated() where value >= 2 {
+                    let rect = CGRect(x: CGFloat(offset + index) * pitch, y: y, width: pitch - gap, height: rowHeight)
+                    context.fill(Path(rect), with: .color(tint.opacity(0.92 * min(value / 100, 1))))
+                }
+            }
+        }
+        .frame(height: CGFloat(cores.count) * (rowHeight + 1))
+        .accessibilityHidden(true)
+    }
+}
+
+
+/// Children side by side at fixed shares of the width (equal by default), all as tall as the
+/// tallest. `Grid` cannot do a 5:7 split, and an `HStack` hands width to whichever child asks.
+struct WeightedHStack: Layout {
+    var weights: [CGFloat] = []
+    var spacing: CGFloat = 16
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 900
+        let height = zip(subviews, widths(width, count: subviews.count))
+            .map { $0.sizeThatFits(ProposedViewSize(width: $1, height: nil)).height }
+            .max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, width) in zip(subviews, widths(bounds.width, count: subviews.count)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(width: width, height: bounds.height))
+            x += width + spacing
+        }
+    }
+
+    /// Weights that do not match the child count (a tile hidden on this Mac) fall back to equal shares.
+    private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
+        guard count > 0 else { return [] }
+        let shares = weights.count == count ? weights : Array(repeating: 1, count: count)
+        let usable = max(total - spacing * CGFloat(count - 1), 0)
+        let sum = shares.reduce(0, +)
+        return shares.map { usable * $0 / sum }
+    }
+}
+
 // MARK: - Cards
 
 extension View {
     /// Rounded card surface used by every dashboard section.
     func cardBackground(padding: CGFloat = 16) -> some View {
         self.padding(padding)
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
+            .background(Palette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.cardBorder, lineWidth: 1))
     }
 }
 
@@ -287,14 +502,21 @@ struct MetricCard<Content: View>: View {
     let style: MetricStyle
     var health: HealthLevel?
     var healthLabel: String?
+    /// Washes the whole card in its Health Level's tint while Warning or Critical, so the card in
+    /// trouble is found before any label is read (Overview's headline row).
+    var emphasizesHealth = false
     @ViewBuilder let content: Content
 
+    /// Matches the Concern banner's wash, so the card and the banner above it read as one signal.
+    static var emphasisFill: Double { 0.12 }
+
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: style.symbol).foregroundStyle(style.tint).font(.title3).frame(width: 24)
-                // At the 980pt window minimum a three-up grid leaves "Internet Health" a few
-                // points short. Shrinking the title slightly keeps the word; an ellipsis loses it.
+                // At the 980pt window minimum a three-up grid leaves long titles a few points
+                // short. Shrinking the title slightly keeps the word; an ellipsis loses it.
                 Text(title).font(.headline).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 if let health { HealthBadge(level: health, label: healthLabel).fixedSize() }
@@ -302,7 +524,23 @@ struct MetricCard<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .cardBackground()
+        .padding(16)
+        .background {
+            shape.fill(Palette.card)
+            if let emphasis { shape.fill(emphasis.tint.opacity(Self.emphasisFill)) }
+        }
+        .overlay {
+            if let emphasis {
+                shape.strokeBorder(emphasis.tint.opacity(0.35), lineWidth: 0.5)
+            } else {
+                shape.strokeBorder(Palette.cardBorder, lineWidth: 1)
+            }
+        }
+    }
+
+    private var emphasis: HealthLevel? {
+        guard emphasizesHealth, let health, health >= .warning else { return nil }
+        return health
     }
 }
 
@@ -420,42 +658,6 @@ struct DeltaLabel: View {
     }
 }
 
-/// Ring of parts that add up to a whole, with the headline figure in the middle.
-struct DonutChart: View {
-    struct Slice: Identifiable {
-        let label: String
-        let value: Double
-        let tint: Color
-        var id: String { label }
-    }
-
-    let slices: [Slice]
-    let centerValue: String
-    let centerCaption: String
-    var diameter: CGFloat = 150
-
-    var body: some View {
-        Chart(slices) { slice in
-            SectorMark(angle: .value(slice.label, slice.value), innerRadius: .ratio(0.68), angularInset: 1.5)
-                .foregroundStyle(slice.tint)
-                .cornerRadius(3)
-        }
-        .chartLegend(.hidden)
-        .chartBackground { _ in
-            VStack(spacing: 1) {
-                Text(centerValue).font(.title3.weight(.semibold)).monospacedDigit()
-                Text(centerCaption).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: diameter, height: diameter)
-        // Each sector is an element by default; the legend beside the ring already lists every value.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(centerValue) \(centerCaption)")
-        .accessibilityValue(slices.map { "\($0.label) \(Format.memory(UInt64(max($0.value, 0))))" }
-            .joined(separator: ", "))
-    }
-}
-
 /// Chart with its statistics rail beside it, dropping the rail underneath when the window is narrow
 /// (the dashboard's minimum width is 980).
 struct ChartWithRail<Content: View>: View {
@@ -477,30 +679,6 @@ struct ChartWithRail<Content: View>: View {
 }
 
 // MARK: - Headers
-
-/// In-content page title for every dashboard section (the window title bar is hidden).
-struct PageHeader<Trailing: View>: View {
-    let title: String
-    let subtitle: String?
-    @ViewBuilder let trailing: Trailing
-
-    var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.largeTitle.weight(.bold))
-                if let subtitle { Text(subtitle).foregroundStyle(.secondary) }
-            }
-            Spacer()
-            trailing
-        }
-    }
-}
-
-extension PageHeader where Trailing == EmptyView {
-    init(_ title: String, subtitle: String?) {
-        self.init(title: title, subtitle: subtitle) { EmptyView() }
-    }
-}
 
 /// Heading for a group inside a page.
 struct SubsectionHeader: View {
@@ -542,7 +720,9 @@ struct AppLogo: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
-            .fill(LinearGradient(colors: [Color(red: 0.25, green: 0.6, blue: 1), Color(red: 0.1, green: 0.35, blue: 0.95)],
+            // The app icon's own gradient (#3B7BFF → #1D3FD6, Redesign_v1), so the in-app mark matches it.
+            .fill(LinearGradient(colors: [Color(red: 0x3B / 255, green: 0x7B / 255, blue: 1),
+                                          Color(red: 0x1D / 255, green: 0x3F / 255, blue: 0xD6 / 255)],
                                  startPoint: .top, endPoint: .bottom))
             .frame(width: size, height: size)
             .overlay {
@@ -567,5 +747,373 @@ final class IconCache {
         let icon = NSRunningApplication(processIdentifier: pid)?.icon ?? generic
         cache[pid] = icon
         return icon
+    }
+}
+
+// MARK: - Concern
+
+/// The Concern as a tinted banner: headline and start, what the signal measures now, and what is
+/// still healthy. The Popover shows it bare; the Overview adds actions at the trailing edge.
+struct ConcernBanner<Actions: View>: View {
+    let concern: Concern
+    let metrics: LiveMetrics
+    /// The Overview's larger variant.
+    var prominent = false
+    @ViewBuilder let actions: Actions
+    @Environment(\.temperatureUnit) private var unit
+
+    private static var fill: Double { MetricCard<EmptyView>.emphasisFill }
+
+    var body: some View {
+        let ink = concern.level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 4.5)
+        let shape = RoundedRectangle(cornerRadius: prominent ? 12 : 10, style: .continuous)
+        HStack(alignment: prominent ? .center : .top, spacing: prominent ? 14 : 10) {
+            Image(systemName: concern.level.symbol)
+                .font(prominent ? .title2 : .title3)
+                .foregroundStyle(concern.level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 3))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(metrics.concernHeadline(concern))
+                    .font((prominent ? Font.body : .callout).weight(.semibold))
+                    .foregroundStyle(ink)
+                // The Overview keeps it to one sentence: figures, then what is still fine.
+                if prominent {
+                    let line = [metrics.concernFigures(concern.signal, unit: unit), Format.healthyLine(concern.healthy)]
+                        .compactMap { $0 }.joined(separator: " ")
+                    if !line.isEmpty { Text(line).font(.callout).foregroundStyle(.secondary) }
+                } else {
+                    if let figures = metrics.concernFigures(concern.signal, unit: unit) { Text(figures).font(.caption) }
+                    if let healthy = Format.healthyLine(concern.healthy) {
+                        Text(healthy).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            actions
+        }
+        .padding(prominent ? 14 : 12)
+        .background(concern.level.tint.opacity(Self.fill), in: shape)
+        .overlay(shape.strokeBorder(concern.level.tint.opacity(0.35), lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension ConcernBanner where Actions == EmptyView {
+    init(concern: Concern, metrics: LiveMetrics) {
+        self.init(concern: concern, metrics: metrics, actions: { EmptyView() })
+    }
+}
+
+/// A page-level notice in the Concern banner's wash — for states that are not a Concern but still
+/// need reading first, such as every alert rule being off. Optional trailing content (a legend, an
+/// action) sits at the right edge.
+struct NoticeBanner<Trailing: View>: View {
+    let level: HealthLevel
+    let symbol: String
+    let title: String
+    var detail: String?
+    @ViewBuilder var trailing: Trailing
+
+    static var fill: Double { MetricCard<EmptyView>.emphasisFill }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 3))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(level.tint.readableInk(on: .tintedFill(Self.fill), minimum: 4.5))
+                if let detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
+            }
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 0)
+            trailing
+        }
+        .padding(14)
+        .background(level.tint.opacity(Self.fill), in: shape)
+        .overlay(shape.strokeBorder(level.tint.opacity(0.35), lineWidth: 0.5))
+        .accessibilityElement(children: .contain)
+    }
+}
+
+extension NoticeBanner where Trailing == EmptyView {
+    init(level: HealthLevel, symbol: String, title: String, detail: String? = nil) {
+        self.init(level: level, symbol: symbol, title: title, detail: detail, trailing: { EmptyView() })
+    }
+}
+
+/// A label in a metric's tint on a wash of it — `HealthBadge`'s shape for facts that are not a Health
+/// Level (a port reachable from the network), so status colour stays reserved for Health Levels.
+struct TintBadge: View {
+    let label: String
+    let tint: Color
+
+    var body: some View {
+        Text(label)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .foregroundStyle(tint.readableInk(on: .tintedFill(HealthBadge.fillOpacity), minimum: 4.5))
+            .background(tint.opacity(HealthBadge.fillOpacity), in: Capsule())
+    }
+}
+
+/// A small filled capsule: a count ("×4") or a tag beside a row's title.
+struct CountChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
+    }
+}
+
+// MARK: - Top processes
+
+/// Which figure ranks the Top Processes list.
+enum ProcessSort: String, CaseIterable {
+    case cpu = "CPU", memory = "Memory"
+}
+
+/// The busiest processes by CPU or memory: icon, name, share bar, figure. A process holding a whole
+/// core or more is drawn red — that is the one to look at. Callers own the process-list gate.
+struct TopProcessList: View {
+    let metrics: LiveMetrics
+    @Binding var sort: ProcessSort
+    var count = 5
+    @State private var icons = IconCache()
+
+    var body: some View {
+        let rows = sort == .cpu ? metrics.topProcesses(byCPU: count) : metrics.topProcesses(byMemory: count)
+        let total = Double(max(metrics.memory?.totalBytes ?? 0, 1))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Top processes").font(.headline)
+                Spacer()
+                Picker("Sort by", selection: $sort) {
+                    ForEach(ProcessSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+            }
+            ForEach(rows) { process in
+                let hot = sort == .cpu && process.cpuPercent >= 100
+                let tint = hot ? Color.red : (sort == .cpu ? MetricStyle.cpu.tint : MetricStyle.memory.tint)
+                HStack(spacing: 8) {
+                    Image(nsImage: icons.icon(for: process.pid)).resizable().frame(width: 16, height: 16)
+                    Text(process.name).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    MeterBar(fraction: sort == .cpu ? process.cpuPercent / 100 : Double(process.memoryBytes) / total,
+                             tint: tint, height: 4)
+                        .frame(width: 100)
+                    Text(sort == .cpu ? "\(Format.decimal(process.cpuPercent, places: 1))%" : Format.memory(process.memoryBytes))
+                        .monospacedDigit()
+                        .foregroundStyle(hot ? Color.red.readableInk(on: .card, minimum: 4.5) : Color.secondary)
+                        .frame(width: 64, alignment: .trailing)
+                }
+                .font(.callout)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+}
+
+// MARK: - Dashboard page pieces
+
+/// One KPI: name and status, the figure, its Trend or caption, and an optional small chart. With an
+/// action the whole tile is a button that scrolls to the section it summarises.
+struct KPITile<Chart: View>: View {
+    let title: String
+    let style: MetricStyle
+    let health: HealthLevel?
+    let value: String?
+    /// Drawn smaller beside the figure ("11 ms"); nil when the unit is part of `value` ("42%").
+    var unit: String?
+    var trend: Double?
+    var trendFormat: (Double) -> String = { Format.percent(abs($0)).replacingOccurrences(of: "%", with: " pt") }
+    var caption: String?
+    @ViewBuilder let chart: Chart
+    var action: (() -> Void)?
+
+    var body: some View {
+        if let action {
+            Button(action: action) { tile.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help("Go to \(title)")
+        } else {
+            tile.accessibilityElement(children: .combine)
+        }
+    }
+
+    private var hasChart: Bool { Chart.self != EmptyView.self }
+
+    private var tile: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Circle().fill(style.tint).frame(width: 7, height: 7)
+                    Text(title).font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                    if let health, health >= .warning {
+                        Text("· \(Format.health(health))")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(health.tint.readableInk(on: .card, minimum: 4.5))
+                    }
+                }
+                .lineLimit(1)
+                if let value, let unit {
+                    FigureText(number: value, unit: unit, size: .title2, unitSize: .callout)
+                } else {
+                    Text(value ?? "—").font(.title2.weight(.semibold)).monospacedDigit().lineLimit(1)
+                }
+                Group {
+                    if let caption {
+                        Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        DeltaLabel(value: trend, format: trendFormat)
+                    }
+                }
+                .frame(height: 16, alignment: .leading)
+            }
+            .padding([.top, .horizontal], 14)
+            if hasChart {
+                // Pins the chart to the bottom whether or not the Trend row drew anything, so
+                // every tile's chart shares one baseline.
+                Spacer(minLength: 8)
+                // Inset from the edges so the line reads as part of the tile, not its border.
+                chart.frame(maxWidth: .infinity).frame(height: 44)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 16)
+            } else {
+                Spacer(minLength: 14)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardBackground(padding: 0)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+extension KPITile where Chart == EmptyView {
+    /// Figure and caption only (the Network strip).
+    init(title: String, style: MetricStyle, health: HealthLevel? = nil, value: String?, unit: String? = nil,
+         caption: String?, action: (() -> Void)? = nil) {
+        self.init(title: title, style: style, health: health, value: value, unit: unit, caption: caption,
+                  chart: { EmptyView() }, action: action)
+    }
+}
+
+/// "● Live · 1 s" — the live range and the sampling interval it runs at.
+struct LivePill: View {
+    let interval: TimeInterval
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(.green).frame(width: 7, height: 7)
+            Text("Live · \(Format.decimal(interval, places: interval < 1 ? 1 : 0)) s")
+        }
+        .font(.caption.weight(.medium))
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .fixedSize()
+    }
+}
+
+struct Section2<Content: View, Trailing: View>: View {
+    let title: String
+    let subtitle: String?
+    let trailing: Trailing
+    let content: Content
+
+    init(title: String, subtitle: String?, @ViewBuilder trailing: () -> Trailing,
+         @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                SubsectionHeader(title, subtitle: subtitle)
+                Spacer(minLength: 12)
+                trailing
+            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardBackground()
+    }
+}
+
+extension Section2 where Trailing == EmptyView {
+    init(title: String, subtitle: String?, @ViewBuilder content: () -> Content) {
+        self.init(title: title, subtitle: subtitle, trailing: { EmptyView() }, content: content)
+    }
+}
+
+/// A grid row that omits itself when the value is nil: the Nil Row Rule, applied to key/value pairs.
+struct KeyValue: View {
+    let key: String
+    let value: String?
+    init(_ key: String, _ value: String?) {
+        self.key = key
+        self.value = value
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let value {
+            GridRow {
+                Text(key).foregroundStyle(.secondary)
+                Text(value).monospacedDigit()
+            }
+        }
+    }
+}
+
+/// `MeterBar` at a fixed width, for table cells: no GeometryReader, so a list of hundreds of
+/// rows refreshing every second lays each bar out in one pass.
+struct CellMeter: View {
+    /// 0...1; clamped.
+    let fraction: Double
+    let tint: Color
+    var width: CGFloat = 56
+    var height: CGFloat = 4
+
+    var body: some View {
+        Capsule()
+            .fill(.quaternary)
+            .frame(width: width, height: height)
+            .overlay(alignment: .leading) {
+                Capsule().fill(tint)
+                    .frame(width: width * min(max(fraction.isNaN ? 0 : fraction, 0), 1), height: height)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// A tinted dot and a short label: where a port is reachable from, a container's state.
+struct DotLabel: View {
+    let text: String
+    let tint: Color
+    var ink: Color? = nil
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(text).foregroundStyle(ink ?? .primary).lineLimit(1)
+        }
     }
 }

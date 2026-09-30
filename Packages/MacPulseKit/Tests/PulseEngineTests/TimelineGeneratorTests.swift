@@ -98,6 +98,29 @@ import PulseCollectors
         #expect(wifi.map(\.title) == ["Network changed"] && wifi.first?.detail == "en0 → en7")
     }
 
+    /// Stored latency lines mean "slot 1 / slot 2", so an edit to the list is marked on the timeline.
+    @Test func targetListChangesAreLoggedAfterTheBaseline() {
+        var g = TimelineGenerator()
+        let first = [ProbeTarget("1.1.1.1"), ProbeTarget("8.8.8.8")]
+        #expect(g.observe(targets: first, at: at(0)).isEmpty)                    // baseline
+        #expect(g.observe(targets: first, at: at(5)).isEmpty)
+        let e = g.observe(targets: [ProbeTarget("github.com"), ProbeTarget("1.1.1.1", label: "Cloudflare")], at: at(10))
+        #expect(e.map(\.title) == ["Internet targets changed"])
+        #expect(e.first?.detail == "github.com, Cloudflare")
+    }
+
+    @Test func unresolvedPrimaryIsNotReportedAsATimeout() {
+        var g = TimelineGenerator()
+        g.config.healthHold = 0
+        let r = NetworkHealthReading.make(connectivity: .online, gateway: nil,
+                                          internet: ProbeReading(address: "x.invalid", latencyMs: nil, lossPercent: nil,
+                                                                 host: "x.invalid", unresolved: true),
+                                          thresholds: NetworkThresholds())
+        _ = g.observe(online(10), interface: "en0", at: at(0))
+        let e = g.observe(r, interface: "en0", at: at(5)) + g.observe(r, interface: "en0", at: at(6))
+        #expect(e.first?.detail == "can't resolve x.invalid")
+    }
+
     @Test func vpnEventsFromConfigIncludingSplitTunnel() {
         var g = TimelineGenerator()
         func config(_ vpn: [String]) -> NetworkConfigReading { NetworkConfigReading(primaryInterface: "en0", vpnInterfaces: vpn, proxies: []) }

@@ -3,41 +3,39 @@ import PulseCore
 import PulseCollectors
 import PulseEngine
 
-/// PRD §5 Level 2 in the mockup style: five metric rows with sparklines, top processes, open button.
+/// PRD §5 Level 2, after `docs/prd/Redesign_v1.html`: the Concern first, then one row per metric
+/// (name and detail, trend, figure and Health Level), the busiest processes, and uptime.
 struct PopoverView: View {
     let metrics: LiveMetrics
     let openDashboard: () -> Void
     @Environment(\.openSettings) private var openSettings
-    @State private var icons = IconCache()
+    @Environment(\.temperatureUnit) private var temperatureUnit
+    @AppStorage("popoverProcessSort") private var processSort = ProcessSort.cpu
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             header
-            Divider()
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 12) {
+            if let concern = metrics.concern { ConcernBanner(concern: concern, metrics: metrics) }
+            VStack(spacing: 10) {
                 cpuRow
+                Divider()
                 memoryRow
+                Divider()
                 networkRow
-                if let battery = metrics.battery { batteryRow(battery) }
-                temperatureRow
+                if let battery = metrics.battery {
+                    Divider()
+                    batteryRow(battery)
+                }
+                Divider()
+                thermalRow
             }
             Divider()
-            topProcesses
-            Button(action: openDashboard) {
-                HStack {
-                    Spacer()
-                    Text("Open Mac Pulse")
-                    Spacer()
-                }
-                .overlay(alignment: .trailing) { Text("⌘O").foregroundStyle(.secondary) }
-                .padding(.vertical, 2)
-            }
-            .controlSize(.large)
-            .keyboardShortcut("o")
+            TopProcessList(metrics: metrics, sort: $processSort)
+            Divider()
+            footer
         }
         .padding(16)
         .frame(width: 400)
-        .background { quitShortcut }
         .onAppear {
             metrics.processListAppeared()
             metrics.sensorsAppeared()
@@ -48,158 +46,189 @@ struct PopoverView: View {
         }
     }
 
-    // MARK: Header
+    // MARK: Header and footer
 
     private var header: some View {
         HStack(spacing: 10) {
-            AppLogo(size: 40)
+            AppLogo(size: 32)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Mac Pulse").font(.headline)
-                Text("Your Mac at a glance").font(.caption).foregroundStyle(.secondary)
+                // Polls the unobserved timestamp, so only this line redraws while the popover is open.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(Format.freshness(metrics.lastSampleAt, now: context.date, interval: metrics.samplingInterval))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Spacer()
-            Menu {
-                Button("Settings…") {
-                    NSApp.activate()
-                    openSettings()
+            Button(action: openDashboard) {
+                HStack(spacing: 6) {
+                    Text("Open")
+                    Text("⌘O").foregroundStyle(.secondary)
                 }
-                Divider()
-                Button("Quit Mac Pulse") { NSApp.terminate(nil) }
+            }
+            .keyboardShortcut("o")
+            .help("Open Mac Pulse")
+            Button {
+                NSApp.activate()
+                openSettings()
             } label: {
                 Image(systemName: "gearshape")
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help("Settings and Quit")
+            .buttonStyle(.borderless)
+            .help("Settings")
         }
     }
 
-    /// ⌘Q while the popover is key; menu-item shortcuts only fire while the menu is open.
-    private var quitShortcut: some View {
-        Button("Quit") { NSApp.terminate(nil) }
+    private var footer: some View {
+        HStack {
+            if let uptime = metrics.uptime {
+                Text("Uptime \(Format.uptime(uptime))")
+            }
+            Spacer()
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Quit")
+                    Text("⌘Q").foregroundStyle(.tertiary)
+                }
+            }
+            .buttonStyle(.borderless)
             .keyboardShortcut("q")
-            .hidden()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     // MARK: Metric rows
 
     private var cpuRow: some View {
-        MetricRow(style: .cpu, title: "CPU", value: metrics.cpu.map { Format.percent($0.totalPercent) },
-                  sparkline: Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100, height: 24)) {
-            badge(metrics.cpuHealth)
+        PopoverRow(style: .cpu, title: "CPU",
+                   subtitle: metrics.cpu.map { "\($0.perCorePercent.count) cores" }) {
+            Sparkline(values: metrics.cpuHistory.values, tint: MetricStyle.cpu.tint, domain: 0...100, height: 26)
+        } value: {
+            if let cpu = metrics.cpu { FigureText(number: "\(Int(cpu.totalPercent.rounded()))", unit: "%") }
+        } status: {
+            if let h = metrics.cpuHealth { HealthStatus(level: h) }
         }
     }
 
     private var memoryRow: some View {
-        MetricRow(style: .memory, title: "Memory",
-                  value: metrics.memory.map { Format.memoryUsage(used: $0.usedBytes, total: $0.totalBytes) },
-                  sparkline: Sparkline(values: metrics.memoryHistory.values, tint: MetricStyle.memory.tint, domain: 0...100, height: 24)) {
-            badge(metrics.memory?.pressure?.health)
+        let m = metrics.memory
+        return PopoverRow(style: .memory, title: "Memory",
+                          subtitle: m.flatMap { $0.swapUsedBytes > 0 ? "\(Format.gigabytes($0.swapUsedBytes, places: 1)) GB swap" : nil }) {
+            MeterBar(fraction: m.map { $0.usedPercent / 100 } ?? 0, tint: MetricStyle.memory.tint)
+        } value: {
+            if let m {
+                FigureText(number: Format.gigabytes(m.usedBytes, places: 1),
+                           unit: "/ \(Format.gigabytes(m.totalBytes, places: 0)) GB")
+            }
+        } status: {
+            if let h = m?.pressure?.health { HealthStatus(level: h) }
         }
     }
 
     private var networkRow: some View {
         let n = metrics.network, h = metrics.networkHealth
-        return MetricRow(style: .network, title: "Network", value: nil, sparkline: nil) {
-            HStack(spacing: 10) {
-                // Throughput appears once the first delta exists; until then the row carries the
-                // badge alone rather than two dashes.
-                if let n {
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.down").foregroundStyle(MetricStyle.network.tint)
-                        Text(Format.rate(n.downBytesPerSec))
-                    }
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.up").foregroundStyle(MetricStyle.upload.tint)
-                        Text(Format.rate(n.upBytesPerSec))
-                    }
-                }
-                Spacer(minLength: 4)
-                if let h {
-                    HealthBadge(level: h.health, label: MenuBarFormatter.latency(h))
-                        .help("Internet latency · \(Format.health(h.health))")
+        let latency = h?.internet?.latencyMs.map { "\(Int($0.rounded())) ms" }
+        let subtitle = [n?.interfaceKind, latency].compactMap { $0 }.joined(separator: " · ")
+        return PopoverRow(style: .network, title: "Network", subtitle: subtitle.isEmpty ? nil : subtitle) {
+            Sparkline(series: [.init(name: "Down", values: metrics.downHistory.values, tint: MetricStyle.network.tint),
+                               .init(name: "Up", values: metrics.upHistory.values, tint: MetricStyle.upload.tint)],
+                      height: 26)
+        } value: {
+            // Throughput appears once the first delta exists.
+            if let n {
+                HStack(spacing: 8) {
+                    rate(n.downBytesPerSec, arrow: "arrow.down", tint: MetricStyle.network.tint)
+                    rate(n.upBytesPerSec, arrow: "arrow.up", tint: MetricStyle.upload.tint)
                 }
             }
-            .font(.callout)
-            .monospacedDigit()
-            .lineLimit(1)
+        } status: {
+            if let h { HealthStatus(level: h.health, label: h.connectivity == .offline ? "Offline" : nil) }
+        }
+    }
+
+    private func rate(_ bytesPerSecond: Double, arrow: String, tint: Color) -> some View {
+        // "8 KB/s" → figure "8", unit "KB/s", so the number carries the weight like every other row.
+        let text = Format.rate(bytesPerSecond)
+        let split = text.lastIndex(of: " ") ?? text.endIndex
+        return HStack(spacing: 2) {
+            Image(systemName: arrow).font(.caption).foregroundStyle(tint)
+            FigureText(number: String(text[..<split]), unit: String(text[split...]).trimmingCharacters(in: .whitespaces),
+                       size: .callout)
         }
     }
 
     private func batteryRow(_ b: BatteryReading) -> some View {
-        MetricRow(style: .battery, title: "Battery", value: Format.percent(b.percent),
-                  sparkline: Sparkline(values: metrics.batteryHistory.values, tint: MetricStyle.battery.tint,
-                                       points: 120, domain: 0...100, height: 24)) {
-            Text(batteryDetail(b)).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+        PopoverRow(style: .battery, title: "Battery", subtitle: batteryDetail(b)) {
+            MeterBar(fraction: b.percent / 100, tint: MetricStyle.battery.tint)
+        } value: {
+            FigureText(number: "\(Int(b.percent.rounded()))", unit: "%")
+        } status: {
+            if b.condition == .serviceRecommended {
+                HealthStatus(level: .warning, label: Format.batteryCondition(.serviceRecommended))
+            } else {
+                Label(b.onACPower ? "On AC" : "Battery", systemImage: b.onACPower ? "bolt.fill" : "battery.50percent")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .labelStyle(.titleAndIcon)
+            }
         }
     }
 
     private func batteryDetail(_ b: BatteryReading) -> String {
-        guard let minutes = b.minutesRemaining else { return b.isCharging ? "Charging" : (b.onACPower ? "On AC" : "") }
-        return b.isCharging ? "\(Format.duration(minutes: minutes)) to full" : "\(Format.duration(minutes: minutes)) left"
-    }
-
-    private var temperatureRow: some View {
-        let celsius = metrics.sensors?.cpuCelsius
-        return MetricRow(style: .temperature, title: "Temperature",
-                         value: celsius.map(Format.celsius) ?? metrics.thermal.map(Format.thermal),
-                         sparkline: celsius == nil ? nil
-                            : Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 24)) {
-            badge(metrics.thermal?.health)
+        if let minutes = b.minutesRemaining {
+            return b.isCharging ? "\(Format.duration(minutes: minutes)) to full" : "\(Format.duration(minutes: minutes)) left"
         }
+        if b.isCharging { return "Charging" }
+        return b.onACPower ? "Charged" : "On battery"
     }
 
-    @ViewBuilder
-    private func badge(_ level: HealthLevel?) -> some View {
-        if let level { HealthBadge(level: level) }
-    }
-
-    // MARK: Top processes
-
-    private var topProcesses: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Top Processes").font(.headline)
-                Spacer()
-                Text("CPU").font(.caption).foregroundStyle(.secondary)
+    private var thermalRow: some View {
+        let celsius = metrics.sensors?.cpuCelsius
+        return PopoverRow(style: .temperature, title: "Thermal", subtitle: metrics.sensors.flatMap { Format.fans($0.fans) }) {
+            Sparkline(values: metrics.temperatureHistory.values, tint: MetricStyle.temperature.tint, height: 26)
+        } value: {
+            if let celsius {
+                let figure = Format.temperatureFigure(celsius, temperatureUnit)
+                FigureText(number: figure.number, unit: figure.unit)
+            } else if let t = metrics.thermal {
+                // No °C on this Mac: the Thermal State itself is the reading.
+                FigureText(number: Format.thermal(t), unit: nil, size: .title3)
             }
-            ForEach(metrics.topProcesses(byCPU: 5)) { process in
-                HStack(spacing: 8) {
-                    Image(nsImage: icons.icon(for: process.pid)).resizable().frame(width: 20, height: 20)
-                    Text(process.name).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Text("\(Format.decimal(process.cpuPercent, places: 1))%").monospacedDigit().foregroundStyle(.secondary)
-                }
-            }
+        } status: {
+            if let h = metrics.thermal?.health { HealthStatus(level: h) }
         }
     }
 }
 
-/// Icon · title · value · sparkline · trailing (badge or detail). A nil value lets `trailing` span the value columns.
-private struct MetricRow<Trailing: View>: View {
+/// Glyph · name and detail · trend or meter · figure over Health Level.
+private struct PopoverRow<Chart: View, Value: View, Status: View>: View {
     let style: MetricStyle
     let title: String
-    let value: String?
-    let sparkline: Sparkline?
-    @ViewBuilder let trailing: Trailing
+    let subtitle: String?
+    @ViewBuilder let chart: Chart
+    @ViewBuilder let value: Value
+    @ViewBuilder let status: Status
 
     var body: some View {
-        GridRow {
+        // Fixed side columns, so every row's trend starts and ends at the same x.
+        HStack(spacing: 12) {
             Image(systemName: style.symbol).foregroundStyle(style.tint).font(.title3).frame(width: 24)
-            Text(title).font(.headline).fixedSize()
-            if value == nil && sparkline == nil {
-                trailing.gridCellColumns(3)
-            } else {
-                Text(value ?? "").monospacedDigit().lineLimit(1).fixedSize()
-                Group {
-                    if let sparkline { sparkline } else { Color.clear.frame(height: 24) }
-                }
-                .frame(minWidth: 50, maxWidth: 80)
-                trailing.fixedSize().gridColumnAlignment(.trailing)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.headline)
+                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
+            .frame(width: 96, alignment: .leading)
+            chart.frame(maxWidth: .infinity)
+            VStack(alignment: .trailing, spacing: 2) {
+                value
+                status
+            }
+            .frame(minWidth: 92, alignment: .trailing)
         }
-        // One utterance per metric: the glyph and the sparkline say nothing aloud on their own.
+        // One utterance per metric: glyph, trend and meter say nothing aloud on their own.
         .accessibilityElement(children: .combine)
     }
 }

@@ -29,6 +29,13 @@ import PulseCore
         #expect(Array(NetworkCollector.counters(only: primary).keys) == [primary])
         #expect(NetworkCollector.counters(only: "nonexistent0").isEmpty)
     }
+
+    @Test func liveInterfaceKindNamesHardwareOnly() throws {
+        let primary = try #require(NetworkCollector.primaryInterface(), "test host has no network route")
+        // A VPN tunnel can be primary and is not hardware, so only a name that exists must be non-empty.
+        if let kind = NetworkCollector.interfaceKind(primary) { #expect(!kind.isEmpty) }
+        #expect(NetworkCollector.interfaceKind("nonexistent0") == nil)
+    }
 }
 
 @Suite struct BatteryParseTests {
@@ -76,6 +83,12 @@ import PulseCore
         d[kIOPSTypeKey] = "UPS"
         #expect(BatteryCollector.parse(d) == nil)
     }
+
+    /// Live: a Mac reporting an internal power source is one the registry calls a laptop. Desktops (CI)
+    /// have no sample, so there is nothing to compare.
+    @Test func internalBatteryAgreesWithPowerSource() {
+        if BatteryCollector().sample() != nil { #expect(BatteryCollector.hasInternalBattery()) }
+    }
 }
 
 @Suite struct ThermalAndDiskTests {
@@ -90,6 +103,65 @@ import PulseCore
         let r = try #require(DiskCollector().sample())
         #expect(r.totalBytes > 0)
         #expect(r.availableBytes > 0 && r.availableBytes <= r.totalBytes)
+    }
+
+    @Test func volumeFilterKeepsLocalBrowsableVolumesStartupFirst() {
+        let local = UInt32(MNT_LOCAL), hidden = UInt32(MNT_LOCAL | MNT_DONTBROWSE)
+        let mounts: [DiskCollector.Mount] = [
+            .init(path: "/System/Volumes/Data", flags: hidden), .init(path: "/Volumes/Backup", flags: local),
+            .init(path: "/System/Volumes/VM", flags: hidden), .init(path: "/", flags: local),
+            .init(path: "/System/Volumes/Preboot", flags: hidden), .init(path: "/System/Volumes/Update", flags: hidden),
+            .init(path: "/System/Volumes/xarts", flags: hidden), .init(path: "/System/Volumes/iSCPreboot", flags: hidden),
+            .init(path: "/System/Volumes/Hardware", flags: hidden), .init(path: "/System/Volumes/Recovery", flags: hidden),
+            .init(path: "/Volumes/Recovery", flags: local), .init(path: "/dev", flags: hidden),
+            .init(path: "/Library/Developer/CoreSimulator/Volumes/iOS_22A", flags: local),
+            // Network: never kept, so capacity is never read and a stale server can't block the Sampler.
+            .init(path: "/Volumes/NAS share", flags: 0), .init(path: "/System/Volumes/Data/home", flags: UInt32(MNT_DONTBROWSE)),
+            // A local mount that asks not to be browsed.
+            .init(path: "/Volumes/Hidden", flags: hidden),
+        ]
+        #expect(DiskCollector.userVolumes(mounts) == ["/", "/Volumes/Backup", "/Volumes/Recovery"])
+    }
+
+    @Test func volumesReuseStartupReadingAndStatfsForOthers() {
+        let local = UInt32(MNT_LOCAL)
+        let mounts: [DiskCollector.Mount] = [
+            .init(path: "/", flags: local, blockSize: 4096, blocks: 1, availableBlocks: 1),
+            .init(path: "/Volumes/USB", flags: local | UInt32(MNT_REMOVABLE), blockSize: 512, blocks: 2_000, availableBlocks: 500),
+            .init(path: "/Volumes/SSD", flags: local, blockSize: 4096, blocks: 100, availableBlocks: 25),
+            .init(path: "/Volumes/NAS", flags: 0, blockSize: 4096, blocks: 100, availableBlocks: 25),
+        ]
+        let startup = DiskReading(volumeName: "Macintosh HD", totalBytes: 1_000, availableBytes: 400, mountPath: "/",
+                                  isInternal: true, isRemovable: false)
+        // The listed numbers are stale placeholders; `refresh` supplies the fresh statfs figures.
+        var refreshed: [String] = []
+        let v = DiskCollector.volumes(from: mounts.map { m in
+            var m = m; m.blocks = 0; m.availableBlocks = 0; return m
+        }, startup: startup) { m in
+            refreshed.append(m.path)
+            return mounts.first { $0.path == m.path }
+        }
+        #expect(refreshed == ["/Volumes/USB", "/Volumes/SSD"])   // never "/" or the network share
+        #expect(v == [
+            startup,
+            DiskReading(volumeName: "USB", totalBytes: 1_024_000, availableBytes: 256_000, mountPath: "/Volumes/USB",
+                        isInternal: nil, isRemovable: true),
+            DiskReading(volumeName: "SSD", totalBytes: 409_600, availableBytes: 102_400, mountPath: "/Volumes/SSD",
+                        isInternal: nil, isRemovable: false),
+        ])
+        // No startup reading this tick: its row is hidden rather than re-read.
+        #expect(DiskCollector.volumes(from: mounts, startup: nil) { $0 }.map(\.mountPath) == ["/Volumes/USB", "/Volumes/SSD"])
+        // A volume whose fresh statfs fails is hidden.
+        #expect(DiskCollector.volumes(from: mounts, startup: startup) { _ in nil } == [startup])
+    }
+
+    @Test func liveVolumesIncludeStartupDisk() throws {
+        let startup = try #require(DiskCollector().sample())
+        #expect(startup.mountPath == "/")
+        let volumes = DiskCollector.sampleVolumes(startup: startup)
+        #expect(volumes.first == startup)
+        #expect(!volumes.contains { $0.mountPath?.hasPrefix("/System/Volumes/") == true })
+        #expect(volumes.allSatisfy { $0.totalBytes > 0 && $0.availableBytes <= $0.totalBytes })
     }
 }
 

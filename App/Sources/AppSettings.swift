@@ -32,6 +32,12 @@ final class AppSettings {
     var lowDiskGB: Double { didSet { save(lowDiskGB, .lowDiskGB); pushHealthConfig() } }
     var hotCPUCelsius: Double { didSet { save(hotCPUCelsius, .hotCPUCelsius); pushHealthConfig() } }
 
+    /// How temperatures are shown everywhere, the Menu Bar included. Display only: readings,
+    /// history and Alert Rule thresholds stay in °C.
+    var temperatureUnit: TemperatureUnit {
+        didSet { save(temperatureUnit.rawValue, .temperatureUnit) }
+    }
+
     var samplingInterval: TimeInterval {
         didSet { save(samplingInterval, .samplingInterval); metrics.setSamplingInterval(samplingInterval) }
     }
@@ -40,8 +46,14 @@ final class AppSettings {
         didSet { save(showDockIcon, .showDockIcon); applyActivationPolicy() }
     }
 
-    var pingTarget: String {
-        didSet { save(pingTarget, .pingTarget); pushNetworkConfig() }
+    /// Internet targets as edited, rows mid-edit included; the first is the Primary Target. The engine
+    /// only ever receives `ProbeTargets.sanitized` of this, a moment after typing stops.
+    var probeTargets: [ProbeTarget] {
+        didSet {
+            guard probeTargets != oldValue else { return }
+            if let data = try? JSONEncoder().encode(probeTargets) { save(data, .probeTargets) }
+            scheduleTargetsPush()
+        }
     }
 
     var latencyWarningMs: Double { didSet { save(latencyWarningMs, .latencyWarningMs); pushNetworkConfig() } }
@@ -107,9 +119,11 @@ final class AppSettings {
         menuBarItems = (defaults.stringArray(forKey: Key.menuBarItems.rawValue)?.compactMap(MenuBarItem.init(rawValue:)))
             ?? MenuBarItem.defaults
         menuBarShowsIcons = defaults.object(forKey: Key.menuBarShowsIcons.rawValue) as? Bool ?? true
+        temperatureUnit = defaults.string(forKey: Key.temperatureUnit.rawValue).flatMap(TemperatureUnit.init(rawValue:))
+            ?? .celsius
         samplingInterval = defaults.object(forKey: Key.samplingInterval.rawValue) as? TimeInterval ?? 1
         showDockIcon = defaults.bool(forKey: Key.showDockIcon.rawValue)
-        pingTarget = defaults.string(forKey: Key.pingTarget.rawValue) ?? "1.1.1.1"
+        probeTargets = Self.loadTargets(defaults)
         latencyWarningMs = defaults.object(forKey: Key.latencyWarningMs.rawValue) as? Double ?? n.latencyMs.warning
         latencyCriticalMs = defaults.object(forKey: Key.latencyCriticalMs.rawValue) as? Double ?? n.latencyMs.critical
         lossWarningPercent = defaults.object(forKey: Key.lossWarningPercent.rawValue) as? Double ?? n.packetLossPercent.warning
@@ -181,19 +195,41 @@ final class AppSettings {
         menuBarItems = MenuBarItem.allCases.filter(set.contains)
     }
 
-    var pingTargetIsValid: Bool {
-        var address = in_addr()
-        return inet_pton(AF_INET, pingTarget, &address) == 1
+    /// Saved targets, or — first launch after targets became a list — the old single "Ping host"
+    /// migrated to [host, its comparison] and its key removed.
+    private static func loadTargets(_ defaults: UserDefaults) -> [ProbeTarget] {
+        if let data = defaults.data(forKey: Key.probeTargets.rawValue),
+           let saved = try? JSONDecoder().decode([ProbeTarget].self, from: data), !saved.isEmpty {
+            return saved
+        }
+        let targets = defaults.string(forKey: Key.pingTarget.rawValue).map(ProbeTargets.migrated(from:)) ?? ProbeTargets.defaults
+        if let data = try? JSONEncoder().encode(targets) { defaults.set(data, forKey: Key.probeTargets.rawValue) }
+        defaults.removeObject(forKey: Key.pingTarget.rawValue)
+        return targets
+    }
+
+    /// The list the engine probes: valid, distinct, 1–4 entries.
+    var effectiveTargets: [ProbeTarget] { ProbeTargets.sanitized(probeTargets) }
+
+    @ObservationIgnored private var targetsPush: Task<Void, Never>?
+
+    /// Waits for typing to stop: every prefix of a host name is itself a valid host name, and each
+    /// pushed change re-resolves and logs a Timeline Event.
+    private func scheduleTargetsPush() {
+        targetsPush?.cancel()
+        targetsPush = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            self?.pushNetworkConfig()
+        }
     }
 
     private func pushNetworkConfig() {
-        // An invalid host would read as 100% loss; keep probing the last valid one until it's fixed.
-        guard pingTargetIsValid else { return }
         // Threshold's precondition requires warning ≤ critical; clamp rather than crash on mid-edit values.
         let thresholds = NetworkThresholds(
             latencyMs: Threshold(warning: min(latencyWarningMs, latencyCriticalMs), critical: latencyCriticalMs),
             packetLossPercent: Threshold(warning: min(lossWarningPercent, lossCriticalPercent), critical: lossCriticalPercent))
-        metrics.configureNetwork(internetTarget: pingTarget, thresholds: thresholds)
+        metrics.configureNetwork(targets: effectiveTargets, thresholds: thresholds)
     }
 
     private func pushHealthConfig() {
@@ -208,11 +244,12 @@ final class AppSettings {
     }
 
     private enum Key: String {
-        case menuBarItems, menuBarShowsIcons, samplingInterval, showDockIcon, pingTarget
+        case menuBarItems, menuBarShowsIcons, samplingInterval, showDockIcon, pingTarget, probeTargets
         case latencyWarningMs, latencyCriticalMs, lossWarningPercent, lossCriticalPercent, retention, alertRules, publicIPEnabled
         case cpuWarningPercent, cpuCriticalPercent, gatewayLatencyMs, dnsSlowMs, lowDiskGB, hotCPUCelsius
         case offeredTemplates
         case didOfferLaunchAtLogin
+        case temperatureUnit
     }
 
     private func save(_ value: Any, _ key: Key) { defaults.set(value, forKey: key.rawValue) }

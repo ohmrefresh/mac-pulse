@@ -14,21 +14,53 @@ import PulseCollectors
             internet: ProbeReading(address: "1.1.1.1", latencyMs: 17.6, lossPercent: 0),
             thresholds: NetworkThresholds())
         let inputs = MenuBarInputs(cpu: cpu, memory: mem, network: net, networkHealth: health, thermal: .serious)
-        #expect(MenuBarFormatter.text(MenuBarItem.defaults, inputs) == "CPU 21% | MEM 62% | ↓8.4M ↑1.2M | 18ms")
-        #expect(MenuBarFormatter.text([.thermal, .cpu], inputs) == "Serious | CPU 21%")
+        #expect(MenuBarFormatter.text(MenuBarItem.defaults, inputs) == "CPU 21% · MEM 62% · ↓8.4M ↑1.2M · 18ms")
+        #expect(MenuBarFormatter.text([.thermal, .cpu], inputs) == "Serious · CPU 21%")
     }
 
     @Test func missingReadingsShowPlaceholder() {
-        #expect(MenuBarFormatter.text(MenuBarItem.defaults, MenuBarInputs()) == "CPU -- | MEM -- | ↓-- ↑-- | --")
+        #expect(MenuBarFormatter.text(MenuBarItem.defaults, MenuBarInputs()) == "CPU -- · MEM -- · ↓-- ↑-- · --")
     }
 
     @Test func temperatureAndGPUSegments() {
-        #expect(MenuBarFormatter.text([.temperature, .gpu], MenuBarInputs(cpuCelsius: 48.6, gpuPercent: 12.2)) == "49°C | GPU 12%")
-        #expect(MenuBarFormatter.text([.temperature, .gpu], MenuBarInputs()) == "--°C | GPU --")
+        #expect(MenuBarFormatter.text([.temperature, .gpu], MenuBarInputs(cpuCelsius: 48.6, gpuPercent: 12.2)) == "49°C · GPU 12%")
+        #expect(MenuBarFormatter.text([.temperature, .gpu], MenuBarInputs()) == "--°C · GPU --")
     }
 
     @Test func batteryOmittedWithoutBattery() {
         #expect(MenuBarFormatter.text([.cpu, .battery], MenuBarInputs()) == "CPU --")
+    }
+
+    private func concern(_ signal: ConcernSignal, _ level: HealthLevel = .warning) -> Concern {
+        Concern(signal: signal, level: level, healthy: [])
+    }
+
+    @Test func noConcernKeepsChosenOrderUnmarked() {
+        let segments = MenuBarFormatter.segments([.cpu, .memory], MenuBarInputs())
+        #expect(segments.map(\.item) == [.cpu, .memory])
+        #expect(segments.allSatisfy { $0.level == nil })
+    }
+
+    @Test func concernLeadsAndIsMarked() {
+        let segments = MenuBarFormatter.segments([.cpu, .memory, .network], MenuBarInputs(), concern: concern(.memory))
+        #expect(segments.map(\.item) == [.memory, .cpu, .network])
+        #expect(segments.map(\.level) == [.warning, nil, nil])
+    }
+
+    @Test func concernShownEvenWhenNotChosen() {
+        let segments = MenuBarFormatter.segments([.cpu], MenuBarInputs(thermal: .critical), concern: concern(.thermal, .critical))
+        #expect(segments.map(\.text) == ["Critical", "CPU --"])
+        #expect(segments.first?.level == .critical)
+    }
+
+    @Test func batteryConcernNamesTheCondition() {
+        #expect(MenuBarFormatter.text([.cpu, .battery], MenuBarInputs(), concern: concern(.battery)) == "BAT Service · CPU --")
+    }
+
+    @Test func offlineConcernLeadsWithOffline() {
+        let offline = NetworkHealthReading.make(connectivity: .offline, gateway: nil, internet: nil, thresholds: NetworkThresholds())
+        let text = MenuBarFormatter.text([.cpu], MenuBarInputs(networkHealth: offline), concern: concern(.internet, .critical))
+        #expect(text == "Offline · CPU --")
     }
 
     @Test func rateFormatting() {
@@ -51,6 +83,15 @@ import PulseCollectors
         #expect(NetworkHealthReading.make(connectivity: .online, gateway: nil, internet: internet(18, loss: 0), thresholds: t).health == .healthy)
         #expect(NetworkHealthReading.make(connectivity: .online, gateway: nil, internet: internet(240, loss: 0), thresholds: t).health == .warning)
         #expect(NetworkHealthReading.make(connectivity: .online, gateway: nil, internet: internet(18, loss: 25), thresholds: t).health == .critical)
+    }
+
+    /// A name that does not resolve is its own state: Warning, not a timeout, and never Critical.
+    @Test func unresolvedPrimaryIsWarning() {
+        let unresolved = ProbeReading(address: "no-such-host.invalid", latencyMs: nil, lossPercent: nil,
+                                      host: "no-such-host.invalid", unresolved: true)
+        let r = NetworkHealthReading.make(connectivity: .online, gateway: nil, internet: unresolved, thresholds: NetworkThresholds())
+        #expect(r.health == .warning)
+        #expect(MenuBarFormatter.latency(r) == "--")
     }
 
     @Test func offlineIsCriticalAndLabelled() {

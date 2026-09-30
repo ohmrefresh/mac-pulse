@@ -80,6 +80,15 @@ public struct BatteryCollector: Sendable {
         }
     }
 
+    /// Whether this Mac has an internal battery (a laptop). Stable for the process's lifetime, unlike
+    /// a power-source sample, which is nil until the first read.
+    public static func hasInternalBattery() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != 0 else { return false }
+        IOObjectRelease(service)
+        return true
+    }
+
     static func smartBatteryHealth() -> (cycleCount: Int?, maximumCapacityPercent: Double?) {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
         guard service != 0 else { return (nil, nil) }
