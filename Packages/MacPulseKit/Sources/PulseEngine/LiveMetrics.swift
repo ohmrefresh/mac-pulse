@@ -27,6 +27,8 @@ public final class LiveMetrics {
     /// CPU frequency and GPU power (private APIs, ADR 0003). Nil unless the Performance page is
     /// visible, and individually nil for anything this Mac does not report.
     public private(set) var frequency: FrequencyReading?
+    /// Wi‑Fi signal and generation. Nil unless the Network page is visible and the primary link is Wi‑Fi.
+    public private(set) var wifi: WiFiReading?
     public let processorName: String?
     /// A laptop: decides "MacBook" vs "Mac" in the sidebar. Read once at launch.
     public let hasInternalBattery: Bool
@@ -74,6 +76,14 @@ public final class LiveMetrics {
     public private(set) var cpuHealth: HealthLevel?
     /// Internet round trip per probe (5 s cadence → 5 min). Timeouts are stored as NaN so charts show gaps.
     public private(set) var latencyHistory = RecentSeries(capacity: 60)
+    /// The rest of the Path, same cadence and NaN convention. A probe that does not exist (no IPv4
+    /// router, no DNS reading) appends nothing, so it never reads as loss.
+    public private(set) var gatewayLatencyHistory = RecentSeries(capacity: 60)
+    /// One series per Comparison Target, keyed by the target as typed; pruned when a target is removed.
+    public private(set) var comparisonLatencyHistories: [String: RecentSeries] = [:]
+    /// The internet targets being probed (sanitized), Primary first.
+    public private(set) var probeTargets = ProbeTargets.defaults
+    public private(set) var dnsLatencyHistory = RecentSeries(capacity: 60)
     /// Thermal state changes, newest last, capped at 50.
     public private(set) var thermalChanges: [ThermalChange] = []
 
@@ -81,6 +91,7 @@ public final class LiveMetrics {
     @ObservationIgnored private var sensorViewers = 0
     @ObservationIgnored private var developerViewers = 0
     @ObservationIgnored private var performanceViewers = 0
+    @ObservationIgnored private var networkViewers = 0
     @ObservationIgnored private let developerMonitor = DeveloperMonitor()
 
     // MARK: Alerts and timeline
@@ -221,6 +232,23 @@ public final class LiveMetrics {
         }
     }
 
+    /// Wi‑Fi details are read every 5 s only while the Network page is visible. Reference-counted, like the
+    /// performance gate; the reading is cleared when the last viewer goes away.
+    public func networkAppeared() {
+        networkViewers += 1
+        if networkViewers == 1 { let sampler = self.sampler; Task { await sampler.setNetworkVisible(true) } }
+    }
+
+    public func networkDisappeared() {
+        guard networkViewers > 0 else { return }
+        networkViewers -= 1
+        if networkViewers == 0 {
+            wifi = nil
+            let sampler = self.sampler
+            Task { await sampler.setNetworkVisible(false) }
+        }
+    }
+
     /// Seconds between GPU samples right now — charts need their own series' spacing, not `samplingInterval`.
     public var gpuInterval: TimeInterval { performanceViewers > 0 ? samplingInterval : 5 }
 
@@ -263,11 +291,25 @@ public final class LiveMetrics {
         Task { await sampler.expedite(jobs) }
     }
 
-    public func configureNetwork(internetTarget: String, thresholds: NetworkThresholds) {
+    /// Internet targets (sanitized to 1–4 valid, distinct entries; the first is the Primary Target) and
+    /// network thresholds. An edit to the list after the first call is logged on the timeline.
+    public func configureNetwork(targets: [ProbeTarget], thresholds: NetworkThresholds) {
+        let targets = ProbeTargets.sanitized(targets)
         diagnosticsConfig.network = thresholds
+        latencyThreshold = thresholds.latencyMs
+        for event in timeline.observe(targets: targets, at: Date()) { post(event) }
+        if targets != probeTargets { probeTargets = targets }
+        let keep = Set(targets.dropFirst().map(\.address))
+        if comparisonLatencyHistories.keys.contains(where: { !keep.contains($0) }) {
+            comparisonLatencyHistories = comparisonLatencyHistories.filter { keep.contains($0.key) }
+        }
         let prober = self.prober
-        Task { await prober.configure(internetTarget: internetTarget, thresholds: thresholds) }
+        Task { await prober.configure(targets: targets, thresholds: thresholds) }
     }
+
+    /// The user's latency bands (Settings), as last passed to `configureNetwork`. Observed, so the
+    /// Network page's bands move as soon as Settings change.
+    public private(set) var latencyThreshold = NetworkThresholds().latencyMs
 
     /// Average over the last 5 minutes of wall time, whatever the sampling interval.
     public var cpuFiveMinuteAverage: Double? {
@@ -283,6 +325,36 @@ public final class LiveMetrics {
     /// Highest CPU % over the last 5 minutes of wall time.
     public var cpuFiveMinutePeak: Double? {
         cpuHistory.suffix(max(1, Int((300 / samplingInterval).rounded()))).max()
+    }
+
+    /// Bytes received and sent over the last 5 minutes of the live buffer.
+    public var transferredLast5Minutes: (down: Double, up: Double) {
+        (Transferred.bytes(rates: downHistory.values, interval: samplingInterval),
+         Transferred.bytes(rates: upHistory.values, interval: samplingInterval))
+    }
+
+    /// Highest throughput in the live buffer and roughly when it happened.
+    public var peakDown: (bytesPerSec: Double, time: Date)? { peak(of: downHistory) }
+    public var peakUp: (bytesPerSec: Double, time: Date)? { peak(of: upHistory) }
+
+    private func peak(of series: RecentSeries) -> (bytesPerSec: Double, time: Date)? {
+        let values = series.values
+        guard let p = Peak.of(values) else { return nil }
+        // Throughput arrives on the fast tick with the CPU, so the newest sample is at `lastSampleAt`.
+        let newest = lastSampleAt ?? Date()
+        return (p.value, newest.addingTimeInterval(-Double(values.count - 1 - p.index) * samplingInterval))
+    }
+
+    /// Hedged one-line reading of the live Path series, using the user's diagnostics and latency limits.
+    public var pathInsight: (text: String, level: HealthLevel)? {
+        let comparisons = (networkHealth?.comparisons ?? []).compactMap { c in
+            comparisonLatencyHistories[c.host ?? c.address].map { (name: c.displayName, stats: LatencyStats($0.values)) }
+        }
+        return PathInsight.evaluate(gateway: LatencyStats(gatewayLatencyHistory.values),
+                                    internet: LatencyStats(latencyHistory.values),
+                                    comparisons: comparisons,
+                                    dns: LatencyStats(dnsLatencyHistory.values),
+                                    config: diagnosticsConfig, latencyWarningMs: diagnosticsConfig.network.latencyMs.warning)
     }
 
     public var menuBarInputs: MenuBarInputs {
@@ -310,7 +382,7 @@ public final class LiveMetrics {
         let live = DiagnosticsRunner.Live(
             memoryUsedPercent: memory?.usedPercent,
             diskFreeBytes: disk.map { Double($0.availableBytes) },
-            primaryTarget: networkHealth?.internet?.address ?? "1.1.1.1",
+            targets: probeTargets,
             cpuFallback: cpuHistory.values)
         return await DiagnosticsRunner.run(history: history, live: live, config: diagnosticsConfig)
     }
@@ -350,8 +422,15 @@ public final class LiveMetrics {
         let now = Date()
         for event in timeline.observe(reading, interface: network?.interface, at: now) { post(event) }
         guard reading.connectivity == .online else { return }
-        latencyHistory.append(reading.internet?.latencyMs ?? .nan)
-        var values: [(AlertMetric, Double)] = [(.latencyMs, reading.internet?.latencyMs ?? .infinity)]
+        // Can't-resolve is not a timeout: it appends nothing, so it never reads as loss.
+        if reading.internet?.unresolved != true { latencyHistory.append(reading.internet?.latencyMs ?? .nan) }
+        if let g = reading.gateway { gatewayLatencyHistory.append(g.latencyMs ?? .nan) }
+        for c in reading.comparisons where !c.unresolved {
+            comparisonLatencyHistories[c.host ?? c.address, default: RecentSeries(capacity: 60)].append(c.latencyMs ?? .nan)
+        }
+        if let d = reading.dns { dnsLatencyHistory.append(d.latencyMs ?? .nan) }
+        var values: [(AlertMetric, Double)] = []
+        if reading.internet?.unresolved != true { values.append((.latencyMs, reading.internet?.latencyMs ?? .infinity)) }
         if let loss = reading.internet?.lossPercent { values.append((.packetLossPercent, loss)) }
         evaluateAlerts(values, at: now)
     }
@@ -384,6 +463,7 @@ public final class LiveMetrics {
         if let v = s.frequency { frequency = v }
         if let v = s.network {
             network = v
+            if v.interfaceKind != NetworkCollector.wifiKind, wifi != nil { wifi = nil }
             downHistory.append(v.downBytesPerSec)
             upHistory.append(v.upBytesPerSec)
         }
@@ -397,6 +477,7 @@ public final class LiveMetrics {
         if let v = s.gpu { gpu = v; gpuHistory.append(v.utilizationPercent) }
         if let v = s.sensors { applySensors(v, at: Date()) }
         if let v = s.peripheralBatteries { peripheralBatteries = v }
+        if let v = s.wifi, networkViewers > 0, v != wifi { wifi = v }
         let now = Date()
         for event in timeline.observe(s, at: now) { post(event) }
         if s.cpu != nil { cpuHealth = timeline.reportedHealth(.cpu) }

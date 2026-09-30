@@ -85,6 +85,15 @@ import PulseCollectors
         #expect(NetworkHealthReading.make(connectivity: .online, gateway: nil, internet: internet(18, loss: 25), thresholds: t).health == .critical)
     }
 
+    /// A name that does not resolve is its own state: Warning, not a timeout, and never Critical.
+    @Test func unresolvedPrimaryIsWarning() {
+        let unresolved = ProbeReading(address: "no-such-host.invalid", latencyMs: nil, lossPercent: nil,
+                                      host: "no-such-host.invalid", unresolved: true)
+        let r = NetworkHealthReading.make(connectivity: .online, gateway: nil, internet: unresolved, thresholds: NetworkThresholds())
+        #expect(r.health == .warning)
+        #expect(MenuBarFormatter.latency(r) == "--")
+    }
+
     @Test func offlineIsCriticalAndLabelled() {
         let r = NetworkHealthReading.make(connectivity: .offline, gateway: nil, internet: nil, thresholds: NetworkThresholds())
         #expect(r.health == .critical)

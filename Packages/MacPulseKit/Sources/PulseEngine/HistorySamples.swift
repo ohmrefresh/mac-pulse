@@ -38,7 +38,7 @@ enum HistorySamples {
         add(.latencyMs, r.internet?.latencyMs)
         add(.packetLossPercent, r.internet?.lossPercent)
         add(.gatewayLatencyMs, r.gateway?.latencyMs)
-        add(.secondaryLatencyMs, r.secondary?.latencyMs)
+        add(.secondaryLatencyMs, r.comparisons.first?.latencyMs)   // slot 2 of the list; slots 3–4 are live only
         add(.dnsLatencyMs, r.dns?.latencyMs)
         return out
     }

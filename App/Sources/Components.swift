@@ -848,3 +848,158 @@ struct TopProcessList: View {
         }
     }
 }
+
+// MARK: - Dashboard page pieces
+
+/// One KPI: name and status, the figure, its Trend or caption, and an optional small chart. With an
+/// action the whole tile is a button that scrolls to the section it summarises.
+struct KPITile<Chart: View>: View {
+    let title: String
+    let style: MetricStyle
+    let health: HealthLevel?
+    let value: String?
+    /// Drawn smaller beside the figure ("11 ms"); nil when the unit is part of `value` ("42%").
+    var unit: String?
+    var trend: Double?
+    var trendFormat: (Double) -> String = { Format.percent(abs($0)).replacingOccurrences(of: "%", with: " pt") }
+    var caption: String?
+    @ViewBuilder let chart: Chart
+    var action: (() -> Void)?
+
+    var body: some View {
+        if let action {
+            Button(action: action) { tile.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help("Go to \(title)")
+        } else {
+            tile.accessibilityElement(children: .combine)
+        }
+    }
+
+    private var hasChart: Bool { Chart.self != EmptyView.self }
+
+    private var tile: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Circle().fill(style.tint).frame(width: 7, height: 7)
+                    Text(title).font(.callout.weight(.medium)).foregroundStyle(.secondary)
+                    if let health, health >= .warning {
+                        Text("· \(Format.health(health))")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(health.tint.readableInk(on: .card, minimum: 4.5))
+                    }
+                }
+                .lineLimit(1)
+                if let value, let unit {
+                    FigureText(number: value, unit: unit, size: .title2, unitSize: .callout)
+                } else {
+                    Text(value ?? "—").font(.title2.weight(.semibold)).monospacedDigit().lineLimit(1)
+                }
+                Group {
+                    if let caption {
+                        Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        DeltaLabel(value: trend, format: trendFormat)
+                    }
+                }
+                .frame(height: 16, alignment: .leading)
+            }
+            .padding([.top, .horizontal], 14)
+            if hasChart {
+                // Pins the chart to the bottom whether or not the Trend row drew anything, so
+                // every tile's chart shares one baseline.
+                Spacer(minLength: 8)
+                // Inset from the edges so the line reads as part of the tile, not its border.
+                chart.frame(maxWidth: .infinity).frame(height: 44)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 16)
+            } else {
+                Spacer(minLength: 14)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .cardBackground(padding: 0)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+extension KPITile where Chart == EmptyView {
+    /// Figure and caption only (the Network strip).
+    init(title: String, style: MetricStyle, health: HealthLevel? = nil, value: String?, unit: String? = nil,
+         caption: String?, action: (() -> Void)? = nil) {
+        self.init(title: title, style: style, health: health, value: value, unit: unit, caption: caption,
+                  chart: { EmptyView() }, action: action)
+    }
+}
+
+/// "● Live · 1 s" — the live range and the sampling interval it runs at.
+struct LivePill: View {
+    let interval: TimeInterval
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(.green).frame(width: 7, height: 7)
+            Text("Live · \(Format.decimal(interval, places: interval < 1 ? 1 : 0)) s")
+        }
+        .font(.caption.weight(.medium))
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .fixedSize()
+    }
+}
+
+struct Section2<Content: View, Trailing: View>: View {
+    let title: String
+    let subtitle: String?
+    let trailing: Trailing
+    let content: Content
+
+    init(title: String, subtitle: String?, @ViewBuilder trailing: () -> Trailing,
+         @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                SubsectionHeader(title, subtitle: subtitle)
+                Spacer(minLength: 12)
+                trailing
+            }
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardBackground()
+    }
+}
+
+extension Section2 where Trailing == EmptyView {
+    init(title: String, subtitle: String?, @ViewBuilder content: () -> Content) {
+        self.init(title: title, subtitle: subtitle, trailing: { EmptyView() }, content: content)
+    }
+}
+
+/// A grid row that omits itself when the value is nil: the Nil Row Rule, applied to key/value pairs.
+struct KeyValue: View {
+    let key: String
+    let value: String?
+    init(_ key: String, _ value: String?) {
+        self.key = key
+        self.value = value
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let value {
+            GridRow {
+                Text(key).foregroundStyle(.secondary)
+                Text(value).monospacedDigit()
+            }
+        }
+    }
+}

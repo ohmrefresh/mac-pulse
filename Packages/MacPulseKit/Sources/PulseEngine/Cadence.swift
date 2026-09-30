@@ -14,6 +14,8 @@ public enum SamplingJob: CaseIterable, Sendable, Hashable {
     case privilegedProcesses
     /// Temperatures and fans (private APIs, ~20 ms per read).
     case sensors
+    /// Wi‑Fi signal and PHY mode; read only while the Network page is visible on Wi‑Fi.
+    case wifi
 }
 
 /// Decides which jobs are due on a tick. Pure so the schedule is testable without a clock.
@@ -40,6 +42,7 @@ public struct Cadence: Sendable {
         case .processes: processesVisible ? baseInterval : 5
         case .privilegedProcesses: 5
         case .sensors: sensorsVisible ? 5 : (sensorsInMenuBar ? 15 : 60)
+        case .wifi: 5
         }
     }
 

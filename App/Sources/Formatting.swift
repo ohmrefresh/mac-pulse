@@ -165,6 +165,37 @@ enum Format {
         return [hasBattery ? "MacBook" : "Mac", chip].compactMap { $0 }.joined(separator: " · ")
     }
 
+    /// "11 ms" — probe round trips, whole milliseconds.
+    static func ms(_ value: Double) -> String { "\(Int(value.rounded())) ms" }
+
+    /// "−54 dBm", with a true minus sign.
+    static func dBm(_ value: Int) -> String {
+        value < 0 ? "\u{2212}\(-value) dBm" : "\(value) dBm"
+    }
+
+    /// The operator of a well-known public resolver used as a ping target; nil for any other address,
+    /// which is shown as itself rather than guessed at.
+    static func probeOperator(_ address: String) -> String? {
+        switch address {
+        case "1.1.1.1", "1.0.0.1": "Cloudflare"
+        case "8.8.8.8", "8.8.4.4": "Google"
+        default: nil
+        }
+    }
+
+    /// An internet target's name: the user's label, else a well-known operator, else the name as
+    /// typed, else the address.
+    static func targetName(label: String?, address: String, host: String?) -> String {
+        label ?? probeOperator(address) ?? host ?? address
+    }
+
+    /// "31 MB" split for `FigureText`: ("31", "MB").
+    static func bytesFigure(_ value: Int64) -> (number: String, unit: String?) {
+        let text = bytesShort(value)
+        guard let space = text.lastIndex(of: " ") else { return (text, nil) }
+        return (String(text[..<space]), String(text[text.index(after: space)...]))
+    }
+
     static func batteryState(_ b: BatteryReading) -> String {
         let state = b.isCharging ? "Charging" : (b.onACPower ? "On AC" : "On battery")
         guard let minutes = b.minutesRemaining else { return state }

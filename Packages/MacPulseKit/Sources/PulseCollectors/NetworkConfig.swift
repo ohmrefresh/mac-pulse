@@ -60,7 +60,13 @@ public enum NetworkConfigCollector {
         return result
     }
 
-    static func ipv4Addresses() -> [String: [String]] {
+    /// The address to show for an interface: its first one that is not link-local (self-assigned).
+    public static func localIPv4(_ addresses: [String]) -> String? {
+        addresses.first { !$0.hasPrefix("169.254.") }
+    }
+
+    /// IPv4 addresses by interface name, e.g. ["en0": ["192.168.1.42"]].
+    public static func ipv4Addresses() -> [String: [String]] {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0, let first = head else { return [:] }
         defer { freeifaddrs(head) }

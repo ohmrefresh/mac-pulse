@@ -1,0 +1,9 @@
+# Store probe history by list slot, not by target address
+
+The user now edits a list of one to four internet targets (the first is the Primary Target, the rest are Comparison Targets). Before that, there were exactly two fixed probes, and history stored them as `MetricKind.latencyMs` (`latency`) and `.secondaryLatencyMs` (`latency2`). `MetricKind` raw values are persisted and may never be renamed, and a `MetricKind` names a metric, not an address, so history cannot say "latency to github.com" without a new schema.
+
+We keep the two kinds and redefine them as **slots**: `latency` is whatever target is first in the list, and `latency2` is whatever target is second. Targets three and four are live only; their Path row shows the in-memory 5-minute series, and stored ranges show only slots one and two. Reordering or replacing a target changes what a stored line means from that moment on. So every change to the list writes a Timeline Event ("Internet targets changed: …"), and a reader of a 7-day chart can see where the line switched targets. Stored-range charts label the lines with the *current* slot names.
+
+The alternatives were a per-target table (`probe_samples(target, t, min/avg/max)` with its own tiering and retention) and recording the primary only. A per-target table gives every target full history, but it costs a migration, a second tiering path in `HistoryStore`, and orphaned rows whenever a target is removed. That is a lot of storage machinery for a comparison feature whose value is mostly live. Primary-only would throw away the second line that Diagnostics and the Latency chart already use.
+
+The cost is that a stored line can silently span two targets. The Timeline Event is the mitigation. If per-target history is ever wanted, the table can be added alongside: the slot kinds stay valid and keep recording, so nothing has to be migrated backwards.

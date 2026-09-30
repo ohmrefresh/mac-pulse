@@ -1,4 +1,5 @@
 import SwiftUI
+import PulseCore
 import PulseEngine
 import PulseStore
 
@@ -8,14 +9,19 @@ struct SettingsView: View {
     @State private var confirmClear = false
     @State private var clearMessage: String?
     @State private var previewVisible = false
+    /// Shared with the Network page's "Edit targets", which opens this window on the Network tab.
+    @AppStorage(Self.tabKey) private var tab = Tab.general.rawValue
+
+    static let tabKey = "settingsTab"
+    enum Tab: String { case general, menuBar, network, health, data }
 
     var body: some View {
-        TabView {
-            general.tabItem { Label("General", systemImage: "gearshape") }
-            menuBar.tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
-            network.tabItem { Label("Network", systemImage: "network") }
-            health.tabItem { Label("Health", systemImage: "stethoscope") }
-            data.tabItem { Label("Data", systemImage: "externaldrive") }
+        TabView(selection: $tab) {
+            general.tabItem { Label("General", systemImage: "gearshape") }.tag(Tab.general.rawValue)
+            menuBar.tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }.tag(Tab.menuBar.rawValue)
+            network.tabItem { Label("Network", systemImage: "network") }.tag(Tab.network.rawValue)
+            health.tabItem { Label("Health", systemImage: "stethoscope") }.tag(Tab.health.rawValue)
+            data.tabItem { Label("Data", systemImage: "externaldrive") }.tag(Tab.data.rawValue)
         }
         .frame(width: 460)
         .padding(20)
@@ -61,21 +67,25 @@ struct SettingsView: View {
 
     private var network: some View {
         Form {
-            TextField("Ping host (IPv4)", text: $settings.pingTarget)
-            if !settings.pingTargetIsValid {
-                Text("Enter an IPv4 address, e.g. 1.1.1.1. Still probing the last valid host.")
-                    .font(.caption).foregroundStyle(.red)
+            ProbeTargetsEditor(targets: $settings.probeTargets)
+            Section("Thresholds (Primary target)") {
+                LabeledContent("Latency warning") { pairedStepper($settings.latencyWarningMs, unit: "ms", step: 10, range: 10...5000, atMost: settings.latencyCriticalMs) }
+                LabeledContent("Latency critical") { pairedStepper($settings.latencyCriticalMs, unit: "ms", step: 10, range: 10...5000, atLeast: settings.latencyWarningMs) }
+                LabeledContent("Packet loss warning") { pairedStepper($settings.lossWarningPercent, unit: "%", step: 1, range: 1...100, atMost: settings.lossCriticalPercent) }
+                LabeledContent("Packet loss critical") { pairedStepper($settings.lossCriticalPercent, unit: "%", step: 1, range: 1...100, atLeast: settings.lossWarningPercent) }
             }
-            LabeledContent("Latency warning") { pairedStepper($settings.latencyWarningMs, unit: "ms", step: 10, range: 10...5000, atMost: settings.latencyCriticalMs) }
-            LabeledContent("Latency critical") { pairedStepper($settings.latencyCriticalMs, unit: "ms", step: 10, range: 10...5000, atLeast: settings.latencyWarningMs) }
-            LabeledContent("Packet loss warning") { pairedStepper($settings.lossWarningPercent, unit: "%", step: 1, range: 1...100, atMost: settings.lossCriticalPercent) }
-            LabeledContent("Packet loss critical") { pairedStepper($settings.lossCriticalPercent, unit: "%", step: 1, range: 1...100, atLeast: settings.lossWarningPercent) }
-            Toggle("Look up public IP address", isOn: $settings.publicIPEnabled)
-            Text("Asks 1.1.1.1 (Cloudflare) when the network changes and at most every 30 minutes.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Probes run every 5 seconds against the gateway and the ping host.")
-                .font(.caption).foregroundStyle(.secondary)
+            Section {
+                Toggle("Look up public IP address", isOn: $settings.publicIPEnabled)
+                Text("Asks 1.1.1.1 (Cloudflare) when the network changes and at most every 30 minutes.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Probes run every 5 seconds against the gateway and each target.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
+        .formStyle(.grouped)
+        // A minimum, not just an ideal: "Edit targets" switches to this tab programmatically, and
+        // then the window only grows to satisfy a minimum.
+        .frame(minHeight: 480)
     }
 
     private var health: some View {

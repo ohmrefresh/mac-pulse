@@ -96,6 +96,39 @@ public struct DiagnosticsConfig: Sendable {
     public init() {}
 }
 
+/// One hedged sentence placing where live latency comes from along the Path (gateway → DNS → internet),
+/// from the last few minutes of probes. Deterministic, like `DiagnosticRules`; nil when nothing stands out.
+public enum PathInsight {
+    public static func evaluate(gateway: LatencyStats?, internet: LatencyStats?,
+                                comparisons: [(name: String, stats: LatencyStats)] = [], dns: LatencyStats?,
+                                config c: DiagnosticsConfig, latencyWarningMs: Double) -> (text: String, level: HealthLevel)? {
+        func spiking(_ s: LatencyStats) -> Bool { (s.p95 ?? 0) >= latencyWarningMs || s.timeouts > 0 }
+        let local = "so spikes likely come from your Wi‑Fi or LAN link."
+        if let g = gateway {
+            if let p95 = g.p95, p95 >= c.gatewayLatencyMs {
+                return ("Gateway itself is slow (p95 \(ms(p95))), \(local)", .warning)
+            }
+            if let loss = g.lossPercent, loss >= c.network.packetLossPercent.warning {
+                return ("Gateway is dropping probes (\(Int(loss.rounded()))% loss), \(local)", .warning)
+            }
+        }
+        if let i = internet, spiking(i), let lan = gateway?.median {
+            return ("Spikes appear only past the gateway (LAN steady at \(ms(lan))), so they're likely on the ISP side rather than your Wi‑Fi.", .warning)
+        }
+        if let p95 = dns?.p95, p95 >= c.dnsSlowMs {
+            return ("DNS lookups are slow (p95 \(ms(p95))), possibly the resolver — try another DNS server.", .warning)
+        }
+        // Exactly one Comparison Target spiking while the Primary Target answers steadily.
+        let slow = comparisons.filter { spiking($0.stats) }
+        if slow.count == 1, let i = internet, i.probes > 0, !spiking(i) {
+            return ("Only \(slow[0].name) is slow — possibly that server or its network.", .warning)
+        }
+        return nil
+    }
+
+    private static func ms(_ v: Double) -> String { "\(Int(v.rounded())) ms" }
+}
+
 /// Deterministic rule catalog (plan decision 8).
 public enum DiagnosticRules {
     public static func evaluate(_ i: DiagnosticInput, config c: DiagnosticsConfig = DiagnosticsConfig()) -> DiagnosticReport {

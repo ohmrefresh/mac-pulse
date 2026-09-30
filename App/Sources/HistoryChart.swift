@@ -68,6 +68,10 @@ struct HistoryChart: View {
     var showsHoverDetails = false
     /// What the chart is of, for VoiceOver. The latest stored value per line is announced with it.
     var accessibilityTitle: String?
+    /// Draws the second line (and its band) negated below a 0 baseline on a symmetric axis.
+    var mirrored = false
+    /// Applied to plotted values; hover details, labels and VoiceOver keep the real values.
+    var scale: ChartScale = .linear
 
     @State private var loaded: [MetricKind: HistorySeries] = [:]
     @State private var error: String?
@@ -99,17 +103,19 @@ struct HistoryChart: View {
         Chart {
             ForEach(lines, id: \.kind) { line in
                 let series = loaded[line.kind] ?? HistorySeries(points: [], stepSeconds: 1)
+                let sign: Double = mirrored && lines.count > 1 && line.kind == lines[1].kind ? -1 : 1
                 ForEach(Array(series.segments.enumerated()), id: \.offset) { index, segment in
                     ForEach(segment, id: \.time) { point in
                         if series.stepSeconds > 1 {
                             AreaMark(x: .value("Time", point.time),
-                                     yStart: .value("Min", point.min), yEnd: .value("Max", point.max),
+                                     yStart: .value("Min", scale.plot(sign * point.min)),
+                                     yEnd: .value("Max", scale.plot(sign * point.max)),
                                      series: .value("Band", "\(line.name)-band-\(index)"))
                                 .interpolationMethod(ChartCurve.line)
                                 .foregroundStyle(by: .value("Series", line.name))
                                 .opacity(0.18)
                         }
-                        LineMark(x: .value("Time", point.time), y: .value(line.name, point.avg),
+                        LineMark(x: .value("Time", point.time), y: .value(line.name, scale.plot(sign * point.avg)),
                                  series: .value("Segment", "\(line.name)-\(index)"))
                             .interpolationMethod(ChartCurve.line)
                             .foregroundStyle(by: .value("Series", line.name))
@@ -145,11 +151,18 @@ struct HistoryChart: View {
         }
         .chartForegroundStyleScale(domain: lines.map(\.name), range: lines.map(\.tint))
         .chartXScale(domain: Date().addingTimeInterval(-range.rawValue)...Date())
-        .chartYScale(domain: 0...yTop)
+        .chartYScale(domain: (mirrored ? -yTop : 0)...yTop)
         .chartYAxis {
-            AxisMarks { value in
-                AxisGridLine()
-                AxisValueLabel { if let v = value.as(Double.self) { Text(format(v)) } }
+            if scale == .signedLog {
+                AxisMarks(values: scale.ticks(maxMagnitude: scale.value(yTop), mirrored: mirrored)) { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
+                }
+            } else {
+                AxisMarks { value in
+                    AxisGridLine()
+                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
+                }
             }
         }
         .chartLegend(lines.count > 1 ? .visible : .hidden)
@@ -196,10 +209,16 @@ struct HistoryChart: View {
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
 
+    /// Plotted top of the y-axis; a mirrored chart spans the same distance below 0.
     private var yTop: Double {
-        if let maximum { return maximum }
+        if let maximum { return scale.plot(maximum) }
         let peak = loaded.values.flatMap { $0.points.map(\.max) }.max() ?? 1
-        return max(peak * 1.1, 1)
+        return scale == .linear ? max(peak * 1.1, 1) : scale.top(maxMagnitude: peak)
+    }
+
+    /// Labels read as magnitudes: the mirrored line's "-10 MB/s" is still 10 MB/s.
+    private func axisLabel(_ plotted: Double) -> String {
+        format(abs(scale.value(plotted)))
     }
 
     private func placeholder(_ text: String) -> some View {

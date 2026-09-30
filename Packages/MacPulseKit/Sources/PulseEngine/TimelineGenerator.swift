@@ -35,6 +35,7 @@ public struct TimelineGenerator: Sendable {
     private var connectivity: Connectivity?
     private var interface: String?
     private var vpnInterfaces: [String]?
+    private var targets: [ProbeTarget]?
     /// pid → when it first qualified as a CPU hog, and whether it has been announced.
     private var hogs: [Int32: (since: Date, announced: Bool, name: String)] = [:]
     /// pid → recent (time, bytes) samples inside the growth window.
@@ -103,11 +104,22 @@ public struct TimelineGenerator: Sendable {
                                             title: "Network changed", detail: "\(old) → \(newInterface)"))
             }
             interface = newInterface
-            let detail = [r.internet?.latencyMs.map { "latency \(Int($0.rounded())) ms" } ?? "probe timeout",
-                          r.internet?.lossPercent.map { "loss \(Int($0.rounded()))%" }].compactMap { $0 }.joined(separator: ", ")
+            let detail = r.internet?.unresolved == true
+                ? "can't resolve \(r.internet!.host ?? r.internet!.address)"
+                : [r.internet?.latencyMs.map { "latency \(Int($0.rounded())) ms" } ?? "probe timeout",
+                   r.internet?.lossPercent.map { "loss \(Int($0.rounded()))%" }].compactMap { $0 }.joined(separator: ", ")
             events += debounce(.network, r.health, at: now, title: "Network", detail: detail)
         }
         return events
+    }
+
+    /// An edit to the internet target list. Stored latency lines mean "slot 1 / slot 2 of the list",
+    /// so this marks where they changed meaning. The first list seen is the baseline.
+    public mutating func observe(targets new: [ProbeTarget], at now: Date) -> [TimelineEvent] {
+        defer { targets = new }
+        guard let old = targets, old != new else { return [] }
+        return [TimelineEvent(time: now, category: .network, severity: .healthy, title: "Internet targets changed",
+                              detail: new.map(\.displayName).joined(separator: ", "))]
     }
 
     /// VPN up/down from interface configuration, which also catches split-tunnel VPNs that never

@@ -62,6 +62,18 @@ The component that reads one metric family from the OS.
 **Probe**:
 An active network test (ICMP ping or DNS lookup) against a target, as opposed to passive reading.
 
+**Path**:
+The chain of Probes from the Mac outward — gateway, DNS resolver, then each internet target — read side by side to place where latency or loss comes from (LAN vs upstream).
+_Avoid_: route, traceroute (no hop-by-hop tracing is done)
+
+**Primary Target**:
+The first internet target in the user's list. Its latency and loss drive the network Health Level, alerts and the Menu Bar.
+_Avoid_: ping host, main target
+
+**Comparison Target**:
+Any other internet target in the user's list. Shown along the Path and used by Diagnostics to tell a target-specific problem from a general upstream one; never affects Health Level.
+_Avoid_: secondary, backup
+
 **Recent Activity**:
 The latest few Timeline Events, newest first, shown on the Overview. Every kind of event, not only Alerts.
 _Avoid_: recent alerts

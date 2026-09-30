@@ -32,7 +32,7 @@ import PulseEngine
         a.samplingInterval = 5
         a.cpuWarningPercent = 70
         a.dnsSlowMs = 350
-        a.pingTarget = "9.9.9.9"
+        a.probeTargets = [ProbeTarget("9.9.9.9", label: "Quad9"), ProbeTarget("example.com")]
         a.retention = .sevenDays
         var rules = a.alertRules
         rules[0].threshold = 75
@@ -42,7 +42,8 @@ import PulseEngine
         #expect(b.menuBarItems == [.cpu, .temperature])
         #expect(!b.menuBarShowsIcons)
         #expect(b.samplingInterval == 5 && b.cpuWarningPercent == 70 && b.dnsSlowMs == 350)
-        #expect(b.pingTarget == "9.9.9.9" && b.retention == .sevenDays)
+        #expect(b.probeTargets == [ProbeTarget("9.9.9.9", label: "Quad9"), ProbeTarget("example.com")])
+        #expect(b.retention == .sevenDays)
         #expect(b.alertRules[0].threshold == 75)
     }
 
@@ -74,12 +75,51 @@ import PulseEngine
         #expect(s.menuBarItems == [.latency])
     }
 
-    @Test func pingTargetValidation() {
+    @Test func freshInstallGetsDefaultTargets() {
         let s = AppSettings(metrics: LiveMetrics(), defaults: freshDefaults())
-        s.pingTarget = "1.1.1.1"
-        #expect(s.pingTargetIsValid)
-        s.pingTarget = "one.one"
-        #expect(!s.pingTargetIsValid)
+        #expect(s.probeTargets == ProbeTargets.defaults)
+    }
+
+    /// The single "Ping host" setting becomes [host, its comparison] once, and its key goes away.
+    @Test func pingTargetMigratesToTargetList() {
+        let d = freshDefaults()
+        d.set("8.8.8.8", forKey: "pingTarget")
+        let s = AppSettings(metrics: LiveMetrics(), defaults: d)
+        #expect(s.probeTargets == [ProbeTarget("8.8.8.8"), ProbeTarget("1.1.1.1")])
+        #expect(d.object(forKey: "pingTarget") == nil)
+        // Later launches read the saved list, not the (gone) old key.
+        #expect(AppSettings(metrics: LiveMetrics(), defaults: d).probeTargets == s.probeTargets)
+    }
+
+    @Test func invalidPingTargetMigratesToDefaults() {
+        let d = freshDefaults()
+        d.set("one.one.", forKey: "pingTarget")
+        #expect(AppSettings(metrics: LiveMetrics(), defaults: d).probeTargets == ProbeTargets.defaults)
+    }
+
+    /// Rows mid-edit are kept as typed; the engine only gets valid, distinct entries.
+    @Test func effectiveTargetsDropInvalidAndDuplicateRows() {
+        let s = AppSettings(metrics: LiveMetrics(), defaults: freshDefaults())
+        s.probeTargets = [ProbeTarget(" 1.1.1.1 "), ProbeTarget(""), ProbeTarget("Example.com"),
+                          ProbeTarget("example.COM"), ProbeTarget("1.1.1.1")]
+        #expect(s.probeTargets.count == 5)
+        #expect(s.effectiveTargets == [ProbeTarget("1.1.1.1"), ProbeTarget("Example.com")])
+        s.probeTargets = [ProbeTarget("not a host")]
+        #expect(s.effectiveTargets == ProbeTargets.defaults)
+    }
+
+    @Test func targetNamesFollowLabelThenOperatorThenHost() {
+        #expect(Format.targetName(label: "Office", address: "1.1.1.1", host: nil) == "Office")
+        #expect(Format.targetName(label: nil, address: "1.1.1.1", host: "one.one.one.one") == "Cloudflare")
+        #expect(Format.targetName(label: nil, address: "93.184.215.14", host: "example.com") == "example.com")
+        #expect(Format.targetName(label: nil, address: "9.9.9.9", host: nil) == "9.9.9.9")
+    }
+
+    @Test func secondHistoryLineFollowsTheTargetList() {
+        let one = NetworkDetailView.latencyLines(targets: [ProbeTarget("9.9.9.9")])
+        #expect(!one.map(\.kind).contains(.secondaryLatencyMs))
+        let two = NetworkDetailView.latencyLines(targets: [ProbeTarget("1.1.1.1"), ProbeTarget("example.com", label: "Web")])
+        #expect(two.map(\.name).prefix(2) == ["Internet · Cloudflare", "Internet · Web"])
     }
 }
 
