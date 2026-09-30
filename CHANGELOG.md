@@ -2,6 +2,35 @@
 
 Notable changes to Mac Pulse. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project is pre-1.0, so the public surface may still change between minor versions.
 
+## [0.2.0] — 2026-10-01
+
+The whole interface is redrawn after the Redesign_v1 and mock_v2 boards. Still a pre-release: unless the release notes below the download say it is signed and notarized, macOS blocks the first launch — right-click Mac Pulse in Applications and choose Open.
+
+### Changed
+
+- **Popover and Overview** lead with the Concern — the single worst non-Healthy signal — as one banner, with Show Processes and View Timeline. The Overview is three rows: CPU, Memory and Network cards; Disk, Battery and Thermal tiles; Top processes beside Recent Activity.
+- **Menu bar** puts the Concern's metric first, marked by a severity glyph and semibold text — weight and shape, never colour.
+- **Performance** is a strip of CPU, GPU, Memory and CPU die tiles over a total CPU line with a per-core heatmap, GPU and Thermal charts, and Memory in GB with its breakdown. Live charts keep a steady axis instead of re-fitting as they fill, and every line is a monotone curve that never overshoots a reading.
+- **Network** has a connection strip, a mirrored throughput chart with Log/Linear, a latency chart banded by your own Health Level thresholds, and a Path card from gateway to each internet target.
+- **Processes** keeps its sortable table and adds CPU and memory bars, a Running column, and All / My apps / System filters.
+- **Developer** opens with a tile per runtime, then Containers (Running / All) and Listening ports (Yours / All), marking which ports are reachable from other machines. VPN, proxy and public IP sit in a card below.
+- **Timeline** has category chips with counts, a strip showing when events happened, days as headings, and search. A warning and its recovery are one row that says how long it lasted, or that it is still ongoing. Power-source events are listed as Power.
+- **Alerts** lists rules by area with a plain "fires when" sentence, severity and when each last fired. The pencil opens the editor, and a banner says when every rule is off.
+- **Sensors** opens with the thermal state and how long it has held, then temperature cards, a chart, every sensor with its range since launch, and fans.
+- **Battery** shows when it will be empty or full, a 24 h / 7 d / 30 d charge chart, health and accessories.
+- **Storage** shows free space with its trend over the history kept, and every mounted local volume when there is more than one.
+
+### Added
+
+- The app has its own icon.
+- Temperatures in °C or °F — one setting, in Settings and on the Sensors page, for the menu bar, popover, dashboard, alert rules and notifications. Readings, history and thresholds are still stored in °C.
+- Internet targets are a list of one to four you edit — IPv4, IPv6 or a hostname — in Settings > Network. The first drives Health Level and alerts; the others are shown for comparison.
+
+### Known limitations
+
+- An alert's "last fired" follows the rule's name, so renaming a rule that has fired shows it as never fired.
+- Alert details and Diagnostics' peak CPU temperature are written in °C and stay in °C when °F is selected.
+
 ## [0.1.1] — 2026-09-28
 
 First build published as a download. It is ad-hoc signed and not notarized, so macOS blocks the first launch: right-click Mac Pulse in Applications and choose Open.
