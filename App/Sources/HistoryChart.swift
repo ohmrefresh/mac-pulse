@@ -116,82 +116,110 @@ struct HistoryChart: View {
         }
     }
 
+    // The body is split into builders so CI's Swift 6.2 can type-check it in time (see TimeSeriesChart).
     private var chart: some View {
         Chart {
             ForEach(lines, id: \.kind) { line in
-                let series = loaded[line.kind] ?? HistorySeries(points: [], stepSeconds: 1)
-                let sign: Double = mirrored && lines.count > 1 && line.kind == lines[1].kind ? -1 : 1
-                ForEach(Array(series.segments.enumerated()), id: \.offset) { index, segment in
-                    ForEach(segment, id: \.time) { point in
-                        if series.stepSeconds > 1 {
-                            AreaMark(x: .value("Time", point.time),
-                                     yStart: .value("Min", scale.plot(sign * point.min)),
-                                     yEnd: .value("Max", scale.plot(sign * point.max)),
-                                     series: .value("Band", "\(line.name)-band-\(index)"))
-                                .interpolationMethod(ChartCurve.line)
-                                .foregroundStyle(by: .value("Series", line.name))
-                                .opacity(0.18)
-                        }
-                        LineMark(x: .value("Time", point.time), y: .value(line.name, scale.plot(sign * point.avg)),
-                                 series: .value("Segment", "\(line.name)-\(index)"))
-                            .interpolationMethod(ChartCurve.line)
-                            .foregroundStyle(by: .value("Series", line.name))
-                            .lineStyle(StrokeStyle(lineWidth: 1.4))
-                    }
-                }
+                lineMarks(line)
             }
             if let hoverDate {
-                RuleMark(x: .value("Time", hoverDate))
-                    .foregroundStyle(.secondary.opacity(0.6))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                    .annotation(position: .top, alignment: .center, spacing: 0,
-                                overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
-                        hoverDetails(at: hoverDate)
-                    }
+                hoverRule(at: hoverDate)
             }
         }
         .chartOverlay { proxy in
             if showsHoverDetails {
-                GeometryReader { geo in
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .onContinuousHover { phase in
-                            switch phase {
-                            case .active(let location):
-                                guard let frame = proxy.plotFrame else { return }
-                                hoverDate = proxy.value(atX: location.x - geo[frame].origin.x, as: Date.self)
-                            case .ended:
-                                hoverDate = nil
-                            }
-                        }
-                }
+                hoverOverlay(proxy)
             }
         }
         .chartForegroundStyleScale(domain: lines.map(\.name), range: lines.map(\.tint))
         .chartXScale(domain: Date().addingTimeInterval(-range.rawValue)...Date())
         .chartYScale(domain: (mirrored ? -yTop : 0)...yTop)
-        .chartYAxis {
-            if scale == .signedLog {
-                AxisMarks(values: scale.ticks(maxMagnitude: scale.value(yTop), mirrored: mirrored)) { value in
-                    AxisGridLine()
-                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
-                }
-            } else if let yTicks {
-                AxisMarks(values: yTicks) { value in
-                    AxisGridLine()
-                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
-                }
-            } else {
-                AxisMarks { value in
-                    AxisGridLine()
-                    AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
-                }
-            }
-        }
+        .chartYAxis { yAxis }
         .chartLegend(showsLegend && lines.count > 1 ? .visible : .hidden)
         // One element for the whole chart; see TimeSeriesChart for why.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityTitle ?? lines.map(\.name).joined(separator: ", "))
         .accessibilityValue(summary)
+    }
+
+    @ChartContentBuilder
+    private func lineMarks(_ line: Line) -> some ChartContent {
+        let series = loaded[line.kind] ?? HistorySeries(points: [], stepSeconds: 1)
+        let sign: Double = mirrored && lines.count > 1 && line.kind == lines[1].kind ? -1 : 1
+        ForEach(Array(series.segments.enumerated()), id: \.offset) { index, segment in
+            ForEach(segment, id: \.time) { point in
+                if series.stepSeconds > 1 {
+                    bandMark(point, line: line, sign: sign, index: index)
+                }
+                averageMark(point, line: line, sign: sign, index: index)
+            }
+        }
+    }
+
+    private func bandMark(_ point: HistoryPoint, line: Line, sign: Double, index: Int) -> some ChartContent {
+        AreaMark(x: .value("Time", point.time),
+                 yStart: .value("Min", scale.plot(sign * point.min)),
+                 yEnd: .value("Max", scale.plot(sign * point.max)),
+                 series: .value("Band", "\(line.name)-band-\(index)"))
+            .interpolationMethod(ChartCurve.line)
+            .foregroundStyle(by: .value("Series", line.name))
+            .opacity(0.18)
+    }
+
+    private func averageMark(_ point: HistoryPoint, line: Line, sign: Double, index: Int) -> some ChartContent {
+        LineMark(x: .value("Time", point.time), y: .value(line.name, scale.plot(sign * point.avg)),
+                 series: .value("Segment", "\(line.name)-\(index)"))
+            .interpolationMethod(ChartCurve.line)
+            .foregroundStyle(by: .value("Series", line.name))
+            .lineStyle(StrokeStyle(lineWidth: 1.4))
+    }
+
+    private func hoverRule(at date: Date) -> some ChartContent {
+        RuleMark(x: .value("Time", date))
+            .foregroundStyle(.secondary.opacity(0.6))
+            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .annotation(position: .top, alignment: .center, spacing: 0,
+                        overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) {
+                hoverDetails(at: date)
+            }
+    }
+
+    private func hoverOverlay(_ proxy: ChartProxy) -> some View {
+        GeometryReader { geo in
+            Rectangle().fill(.clear).contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let location):
+                        guard let frame = proxy.plotFrame else { return }
+                        hoverDate = proxy.value(atX: location.x - geo[frame].origin.x, as: Date.self)
+                    case .ended:
+                        hoverDate = nil
+                    }
+                }
+        }
+    }
+
+    @AxisContentBuilder
+    private var yAxis: some AxisContent {
+        if scale == .signedLog {
+            AxisMarks(values: scale.ticks(maxMagnitude: scale.value(yTop), mirrored: mirrored)) { value in
+                axisMark(value)
+            }
+        } else if let yTicks {
+            AxisMarks(values: yTicks) { value in
+                axisMark(value)
+            }
+        } else {
+            AxisMarks { value in
+                axisMark(value)
+            }
+        }
+    }
+
+    @AxisMarkBuilder
+    private func axisMark(_ value: AxisValue) -> some AxisMark {
+        AxisGridLine()
+        AxisValueLabel { if let v = value.as(Double.self) { Text(axisLabel(v)) } }
     }
 
     /// "CPU 12%, last 1 h" — the newest stored value per line over the selected range.
