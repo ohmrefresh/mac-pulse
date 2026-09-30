@@ -4,7 +4,7 @@ A macOS menu-bar system monitor that answers one question the built-in tools do 
 
 [![CI](https://github.com/ohmrefresh/mac-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/ohmrefresh/mac-pulse/actions/workflows/ci.yml)
 
-<img src="docs/screenshots/popover.png" alt="The Mac Pulse popover showing CPU, memory, network, battery and temperature rows, each with a sparkline and a health badge, above a list of the top processes by CPU" width="426">
+<img src="docs/screenshots/popover.png" alt="The Mac Pulse popover: CPU, memory, network, battery and thermal rows, each with a sparkline or bar and a Healthy badge, above the top processes by CPU" width="426">
 
 Activity Monitor shows the present instant. Mac Pulse keeps history, marks when things changed, and offers deterministic diagnostics — so you can get from "my Mac feels wrong" to a specific, checkable cause.
 
@@ -14,7 +14,7 @@ It works at three levels, and you can stop at whichever one answers your questio
 
 **Menu bar.** An always-visible status item with up to eight segments you pick in Settings — CPU, memory, network throughput, internet latency, battery, thermal state, CPU temperature and GPU. No sparklines, no colour; it is meant to be read at a glance and otherwise ignored.
 
-![The Mac Pulse menu bar item reading CPU 7%, MEM 80%, download 1.9K, upload 0K, 8ms latency and 35 degrees Celsius](docs/screenshots/menu-bar.png)
+![The Mac Pulse menu bar item reading download 13K, upload 353K, 7 ms latency and 44 degrees Celsius](docs/screenshots/menu-bar.png)
 
 **Popover.** One click gives you CPU, memory, network and temperature — plus battery on Macs that have one — each with a recent sparkline and a Health Level badge, followed by the Top Processes by CPU.
 
@@ -32,17 +32,37 @@ Causes are offered as likely or possible — suggestions, not certainties. A val
 
 ## Screenshots
 
-### Dashboard — Overview
+### Overview
 
-Leads with the one thing that needs attention, then the cards.
+CPU, Memory and Network lead as cards; disk, battery and thermal follow as tiles, then the top processes beside recent activity. When something needs attention, a banner above them says what.
 
-![The Mac Pulse Overview page, headed by a warning that memory pressure is at Warning, with cards for CPU, memory, network, disk, battery and temperature, plus internet health and recent activity](docs/screenshots/dashboard.png)
+![The Mac Pulse Overview page with CPU, Memory and Network cards marked Healthy, tiles for the startup disk, battery and thermal readings, the top processes by memory and recent activity](docs/screenshots/dashboard.png)
 
 ### Performance
 
-CPU per core, load average or combined, with GPU, memory and temperature alongside. CPU frequency and GPU power are read through IOReport.
+A tile per metric, then total CPU over a per-core heatmap, GPU and Thermal charts. CPU frequency and GPU power are read through IOReport.
 
-![The Mac Pulse Performance page showing CPU, GPU, memory and temperature cards above a per-core CPU chart with fifteen lines, and a rail listing total usage, current and maximum frequency, core counts, load averages and uptime](docs/screenshots/performance.png)
+![The Mac Pulse Performance page: CPU, GPU, Memory and CPU die tiles above a five-minute CPU chart with a per-core heatmap, a rail of frequency, load and busiest core, and GPU and Thermal charts](docs/screenshots/performance.png)
+
+### Network
+
+Connection, latency, packet loss and traffic, a mirrored throughput chart, latency banded by your own thresholds, and the path from gateway to each internet target.
+
+![The Mac Pulse Network page: a connected Wi-Fi strip with latency, loss and transferred figures, a mirrored download and upload chart, a latency chart and a path card for gateway, DNS resolver and two internet targets](docs/screenshots/network.png)
+
+### Timeline
+
+Every change is a Timeline Event; a warning and its recovery are one row that says how long it lasted.
+
+![The Mac Pulse Timeline filtered to Memory over the last 24 hours: an event strip, and rows such as "Memory pressure → Warning · back to normal at 21:12" with "Lasted 1 m 17 s"](docs/screenshots/timeline.png)
+
+### Processes, Developer, Sensors, Battery and Alerts
+
+| | |
+| --- | --- |
+| ![The Processes table with CPU and memory bars, user and running time](docs/screenshots/processes.png) | ![The Developer page with runtime tiles, running containers and listening ports marked by reachability](docs/screenshots/developer.png) |
+| ![The Sensors page with the thermal state banner, temperature cards, a temperature chart, every sensor's range since launch and fans](docs/screenshots/sensors.png) | ![The Battery page with charge, time remaining, a 24-hour charge chart, health and accessories](docs/screenshots/battery.png) |
+| ![The Alerts page listing rules by area with what fires them, severity and when each last fired](docs/screenshots/alerts.png) | |
 
 ## Requirements
 
