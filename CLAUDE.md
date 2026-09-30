@@ -89,6 +89,19 @@ App UI rule: popover and dashboard host SwiftUI inside AppKit (`NSPopover`, `NSW
 - **SMC struct layout:** `SMCConnection.KeyData` must be exactly 80 bytes; `KeyInfo` has explicit padding because Swift otherwise packs following fields into its tail.
 - **Menu-bar-only operation** must stay fully functional; nothing critical may depend on the dashboard window.
 
+## Claude Code tooling (`.claude/`)
+
+These read this file as their source of truth, so change the rules here, not in them.
+
+- Agents:
+  - `package-engineer`: edits `Packages/MacPulseKit` only, test-first, and keeps deprecated shims for the App.
+  - `app-engineer`: edits `App/` and `project.yml` only, runs xcodebuild tests, and takes screenshots.
+  - `invariant-reviewer`: read-only diff review against the Invariants.
+- Skills:
+  - `/cross-layer-feature <plan>`: the hand-driven package → app → review → fix loop.
+  - `/release X.Y.Z`: manual only. It bumps the version, updates the CHANGELOG and runs the tests and soak gate, then commits and tags locally and never pushes.
+- Workflow `cross-layer-feature` (`args` = the approved plan path): the same loop hands-off, with one fix round and a test gate. It never commits.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
