@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "PulseEngine", targets: ["PulseEngine"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.11.0"),
+        .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.12.0"),
     ],
     targets: [
         .target(name: "PulseCore"),
