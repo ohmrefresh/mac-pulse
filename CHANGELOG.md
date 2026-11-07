@@ -2,6 +2,12 @@
 
 Notable changes to Mac Pulse. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project is pre-1.0, so the public surface may still change between minor versions.
 
+## [0.2.1] — 2026-11-07
+
+### Changed
+
+- GRDB.swift updated to 7.12.0.
+
 ## [0.2.0] — 2026-10-01
 
 The whole interface is redrawn after the Redesign_v1 and mock_v2 boards. Still a pre-release: unless the release notes below the download say it is signed and notarized, macOS blocks the first launch — right-click Mac Pulse in Applications and choose Open.
